@@ -1,0 +1,9 @@
+2025-03-17 18:03:51 - trading_bot - INFO - Verbindung zum Binance Testnet hergestellt
+2025-03-17 18:09:00 - trading_bot - INFO - 293 Datenpunkte für BTCUSDT mit Intervall 1h geladen
+2025-03-17 18:09:00 - trading_bot - INFO - Technische Indikatoren initialisiert
+2025-03-17 18:09:00 - trading_bot - INFO - Alle technischen Indikatoren hinzugefügt, 94 gültige Datenpunkte
+2025-03-17 18:09:14 - trading_bot - INFO - Daten in output/BTCUSDT_1h_20250317_180914.csv gespeichert
+2025-03-17 18:09:37 - trading_bot - INFO - Verbindung zum Binance Testnet hergestellt
+2025-03-17 18:10:04 - trading_bot - ERROR - Fehler beim Laden der historischen Daten: APIError(code=-1100): Illegal characters found in parameter 'symbol'; legal range is '^[A-Z0-9-_.]{1,20}$'.
+2025-03-17 18:10:04 - trading_bot - ERROR - Keine Daten gefunden. Bitte überprüfe das Symbol und Intervall.
+2025-03-17 18:10:08 - trading_bot - INFO - Verbindung zum Binance Testnet hergestellt

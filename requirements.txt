@@ -1,0 +1,9 @@
+python-binance==1.0.16
+pandas==1.5.3
+numpy==1.24.3
+tensorflow==2.12.0
+scikit-learn==1.2.2
+matplotlib==3.7.1
+schedule==1.2.0
+python-dotenv==1.0.0
+ta==0.10.2  # Technical Analysis-Bibliothek

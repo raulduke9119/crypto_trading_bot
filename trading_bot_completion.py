@@ -1,0 +1,633 @@
+"""
+Ergänzende Methoden für den Trading Bot.
+Diese Datei enthält alle Methoden, die noch zur TradingBot-Klasse hinzugefügt werden müssen.
+"""
+import os
+import time
+import numpy as np
+import pandas as pd
+from datetime import datetime
+from typing import Dict, List, Optional, Union, Tuple, Any
+from binance.client import Client
+from binance.exceptions import BinanceAPIException
+from binance.enums import *
+
+# Die folgenden Methoden müssen in die TradingBot-Klasse in trading_bot.py integriert werden:
+
+"""
+def rank_trading_opportunities(self, market_data: Dict[str, pd.DataFrame]) -> List[Tuple[str, int, float]]:
+    \"\"\"
+    Rankt potenzielle Handelsmöglichkeiten basierend auf Signalen und Stärke.
+    
+    Args:
+        market_data: Dictionary mit Marktdaten
+        
+    Returns:
+        Liste von (Symbol, Signal, Stärke)-Tupeln, sortiert nach Stärke
+    \"\"\"
+    try:
+        opportunities = []
+        
+        for symbol, df in market_data.items():
+            # Hole den neuesten Datenpunkt
+            if df.empty:
+                continue
+                
+            latest = df.iloc[-1]
+            
+            # Prüfe, ob es ein Handelssignal gibt
+            signal = latest.get('signal', 0)
+            
+            # Überprüfe, ob signal None ist und setze es auf 0, wenn ja
+            if signal is None:
+                signal = 0
+            
+            if signal != 0:  # Wenn es ein Kauf- oder Verkaufssignal gibt
+                strength = latest.get('signal_strength', 0)
+                
+                # Überprüfe, ob strength None ist und setze es auf 0, wenn ja
+                if strength is None:
+                    strength = 0
+                
+                # Wenn ML aktiviert ist, passe die Signalstärke an
+                if self.use_ml and symbol in self.prediction_models:
+                    prediction = self.prediction_models[symbol].predict(df)
+                    
+                    if prediction is not None:
+                        # Passe die Signalstärke basierend auf der Vorhersagerichtung an
+                        if (signal > 0 and prediction > 0) or (signal < 0 and prediction < 0):
+                            # Vorhersage stimmt mit Signal überein, verstärke
+                            strength *= (1 + abs(prediction))
+                        else:
+                            # Vorhersage widerspricht Signal, schwäche ab
+                            strength *= (1 - min(0.8, abs(prediction)))
+                
+                opportunities.append((symbol, int(signal), float(strength)))
+        
+        # Sortiere nach Stärke in absteigender Reihenfolge
+        opportunities.sort(key=lambda x: x[2], reverse=True)
+        
+        logger.info(f"Handelsmöglichkeiten gerankt: {len(opportunities)} gefunden")
+        return opportunities
+        
+    except Exception as e:
+        logger.error(f"Fehler beim Ranken der Handelsmöglichkeiten: {e}")
+        return []
+
+def execute_trades(self, opportunities: List[Tuple[str, int, float]], market_data: Dict[str, pd.DataFrame]) -> None:
+    \"\"\"
+    Führt Trades basierend auf den gerankten Möglichkeiten aus.
+    
+    Args:
+        opportunities: Liste von (Symbol, Signal, Stärke)-Tupeln
+        market_data: Dictionary mit Marktdaten
+    \"\"\"
+    try:
+        # Überspringe, wenn es keine Möglichkeiten gibt
+        if not opportunities:
+            logger.info("Keine Handelsmöglichkeiten gefunden")
+            return
+        
+        # Prüfe Kontoguthaben
+        balance = self.order_executor.get_account_balance()
+        
+        # Überspringe, wenn nicht genügend Guthaben vorhanden ist
+        if balance < 10.0:  # Minimaler Guthaben-Schwellenwert
+            logger.warning(f"Unzureichendes Guthaben: {balance} USDT")
+            return
+        
+        # Prüfe aktive Positionen
+        active_positions = len(self.positions)
+        
+        # Überspringe, wenn maximale Positionen erreicht sind
+        if active_positions >= self.max_positions:
+            logger.info(f"Maximale Positionen erreicht: {active_positions}/{self.max_positions}")
+            return
+        
+        # Berechne verfügbare Positionen
+        available_positions = self.max_positions - active_positions
+        
+        # Wähle Top-Möglichkeiten basierend auf verfügbaren Positionen
+        selected_opportunities = opportunities[:available_positions]
+        
+        for symbol, signal, strength in selected_opportunities:
+            # Prüfe, ob wir bereits eine Position in diesem Symbol haben
+            if symbol in self.positions:
+                logger.info(f"Bereits eine Position in {symbol}")
+                continue
+            
+            # Hole den aktuellen Preis
+            current_price = self.data_collector.get_latest_price(symbol)
+            
+            if current_price is None:
+                logger.warning(f"Konnte aktuellen Preis für {symbol} nicht abrufen")
+                continue
+            
+            if signal > 0:  # Kaufsignal
+                # Berechne Stop-Loss-Preis
+                stop_loss_price = self.strategy.get_stop_loss_price(
+                    market_data[symbol], current_price, is_long=True
+                )
+                
+                # Berechne Take-Profit-Preis
+                take_profit_price = self.strategy.calculate_take_profit(
+                    current_price, stop_loss_price, risk_reward_ratio=2.0
+                )
+                
+                # Berechne Positionsgröße
+                quantity = self.strategy.calculate_position_size(
+                    current_price, stop_loss_price, balance
+                )
+                
+                # Stelle sicher, dass Mindestmenge erreicht wird
+                if quantity * current_price < 10.0:  # Minimaler Orderwert
+                    logger.warning(f"Berechnete Menge zu klein für {symbol}")
+                    continue
+                
+                # Platziere Market-Buy-Order
+                order = self.order_executor.place_market_order(
+                    symbol=symbol,
+                    side='BUY',
+                    quantity=quantity
+                )
+                
+                if order:
+                    # Platziere Stop-Loss-Order
+                    stop_order = self.order_executor.place_stop_loss_order(
+                        symbol=symbol,
+                        quantity=quantity,
+                        stop_price=stop_loss_price
+                    )
+                    
+                    # Platziere Take-Profit-Order
+                    take_profit_order = self.order_executor.place_take_profit_order(
+                        symbol=symbol,
+                        quantity=quantity,
+                        take_profit_price=take_profit_price
+                    )
+                    
+                    # Erfasse die Position
+                    self.positions[symbol] = {
+                        'entry_price': current_price,
+                        'quantity': quantity,
+                        'stop_loss': stop_loss_price,
+                        'take_profit': take_profit_price,
+                        'entry_time': datetime.now(),
+                        'order_id': order.get('orderId'),
+                        'stop_order_id': stop_order.get('orderId') if stop_order else None,
+                        'take_profit_order_id': take_profit_order.get('orderId') if take_profit_order else None
+                    }
+                    
+                    logger.info(f"Long-Position in {symbol} eröffnet: {quantity} zu {current_price}")
+                    
+            elif signal < 0 and symbol in self.positions:  # Verkaufssignal für bestehende Position
+                position = self.positions[symbol]
+                
+                # Platziere Market-Sell-Order
+                order = self.order_executor.place_market_order(
+                    symbol=symbol,
+                    side='SELL',
+                    quantity=position['quantity']
+                )
+                
+                if order:
+                    # Storniere bestehende Stop-Loss- und Take-Profit-Orders
+                    if position.get('stop_order_id'):
+                        self.order_executor.cancel_order(symbol, position['stop_order_id'])
+                    
+                    if position.get('take_profit_order_id'):
+                        self.order_executor.cancel_order(symbol, position['take_profit_order_id'])
+                    
+                    # Berechne Gewinn/Verlust
+                    entry_price = position['entry_price']
+                    exit_price = current_price
+                    quantity = position['quantity']
+                    pnl = (exit_price - entry_price) * quantity
+                    
+                    # Aktualisiere Performance-Metriken
+                    self.trades_executed += 1
+                    if pnl > 0:
+                        self.successful_trades += 1
+                    else:
+                        self.failed_trades += 1
+                    
+                    self.total_profit_loss += pnl
+                    
+                    logger.info(f"Position in {symbol} geschlossen: {quantity} zu {exit_price}, PnL: {pnl:.2f} USDT")
+                    
+                    # Entferne die Position
+                    del self.positions[symbol]
+        
+    except Exception as e:
+        logger.error(f"Fehler beim Ausführen von Trades: {e}")
+
+def check_open_positions(self) -> None:
+    \"\"\"
+    Überprüft und verwaltet offene Positionen.
+    \"\"\"
+    try:
+        positions_to_remove = []
+        
+        for symbol, position in self.positions.items():
+            # Hole aktuellen Preis
+            current_price = self.data_collector.get_latest_price(symbol)
+            
+            if current_price is None:
+                continue
+            
+            # Berechne aktuellen Gewinn/Verlust
+            entry_price = position['entry_price']
+            quantity = position['quantity']
+            unrealized_pnl = (current_price - entry_price) * quantity
+            
+            # Prüfe, ob Stop-Loss oder Take-Profit ausgelöst wurde
+            if position.get('stop_order_id'):
+                order_status = self.order_executor.check_order_status(
+                    symbol, position['stop_order_id']
+                )
+                
+                if order_status == 'FILLED':
+                    logger.info(f"Stop-Loss für {symbol} bei {position['stop_loss']} ausgelöst")
+                    
+                    # Aktualisiere Performance-Metriken
+                    self.trades_executed += 1
+                    self.failed_trades += 1
+                    self.total_profit_loss += (position['stop_loss'] - entry_price) * quantity
+                    
+                    positions_to_remove.append(symbol)
+            
+            if position.get('take_profit_order_id'):
+                order_status = self.order_executor.check_order_status(
+                    symbol, position['take_profit_order_id']
+                )
+                
+                if order_status == 'FILLED':
+                    logger.info(f"Take-Profit für {symbol} bei {position['take_profit']} ausgelöst")
+                    
+                    # Aktualisiere Performance-Metriken
+                    self.trades_executed += 1
+                    self.successful_trades += 1
+                    self.total_profit_loss += (position['take_profit'] - entry_price) * quantity
+                    
+                    positions_to_remove.append(symbol)
+        
+        # Entferne geschlossene Positionen
+        for symbol in positions_to_remove:
+            if symbol in self.positions:
+                del self.positions[symbol]
+        
+    except Exception as e:
+        logger.error(f"Fehler beim Überprüfen offener Positionen: {e}")
+
+def print_status(self) -> None:
+    \"\"\"
+    Gibt den aktuellen Status des Bots aus.
+    \"\"\"
+    try:
+        logger.info("=== Trading Bot Status ===")
+        
+        # Zeige Kontoguthaben
+        balance = self.order_executor.get_account_balance()
+        logger.info(f"Aktuelles Guthaben: {balance:.2f} USDT")
+        
+        # Zeige offene Positionen
+        logger.info(f"Offene Positionen: {len(self.positions)}/{self.max_positions}")
+        
+        for symbol, position in self.positions.items():
+            current_price = self.data_collector.get_latest_price(symbol)
+            
+            if current_price is not None:
+                entry_price = position['entry_price']
+                quantity = position['quantity']
+                unrealized_pnl = (current_price - entry_price) * quantity
+                pnl_percent = (current_price / entry_price - 1) * 100
+                
+                logger.info(f"  {symbol}: {quantity} @ {entry_price:.6f}, Aktuell: {current_price:.6f}, " +
+                           f"PnL: {unrealized_pnl:.2f} USDT ({pnl_percent:.2f}%)")
+        
+        # Zeige Performance-Metriken
+        if self.trades_executed > 0:
+            win_rate = self.successful_trades / self.trades_executed * 100
+            logger.info(f"Performance: {self.trades_executed} Trades, " +
+                       f"Gewinnrate: {win_rate:.2f}%, " +
+                       f"Gesamt-PnL: {self.total_profit_loss:.2f} USDT")
+        
+    except Exception as e:
+        logger.error(f"Fehler beim Ausgeben des Status: {e}")
+
+def run_trading_cycle(self) -> None:
+    \"\"\"
+    Führt einen vollständigen Handelszyklus aus.
+    \"\"\"
+    try:
+        logger.info("Starte Handelszyklus...")
+        
+        # Aktualisiere Marktdaten
+        market_data = self.update_market_data()
+        
+        if not market_data:
+            logger.warning("Keine Marktdaten verfügbar, überspringe Zyklus")
+            return
+        
+        # Ranke Handelsmöglichkeiten
+        opportunities = self.rank_trading_opportunities(market_data)
+        
+        # Führe Trades aus
+        self.execute_trades(opportunities, market_data)
+        
+        # Überprüfe offene Positionen
+        self.check_open_positions()
+        
+        # Gib Status aus
+        self.print_status()
+        
+        logger.info("Handelszyklus abgeschlossen")
+        
+    except Exception as e:
+        logger.error(f"Fehler im Handelszyklus: {e}")
+
+def run(self, interval_minutes: int = 15) -> None:
+    \"\"\"
+    Startet den Trading Bot im kontinuierlichen Modus.
+    
+    Args:
+        interval_minutes: Intervall zwischen Handelszyklen in Minuten
+    \"\"\"
+    try:
+        # Teste Verbindung
+        if not self.test_connection():
+            logger.error("Verbindungstest fehlgeschlagen, beende")
+            return
+        
+        # Initialer Handelszyklus
+        self.run_trading_cycle()
+        
+        # Plane regelmäßige Handelszyklen
+        schedule.every(interval_minutes).minutes.do(self.run_trading_cycle)
+        
+        logger.info(f"Trading Bot gestartet, Intervall: {interval_minutes} Minuten")
+        
+        # Hauptschleife
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+            
+    except KeyboardInterrupt:
+        logger.info("Trading Bot durch Benutzer beendet")
+    except Exception as e:
+        logger.error(f"Unerwarteter Fehler: {e}")
+
+def backtest(self, 
+            start_date: str, 
+            end_date: Optional[str] = None, 
+            initial_balance: float = 1000.0) -> Dict[str, Any]:
+    \"\"\"
+    Führt einen Backtest der Strategie durch.
+    
+    Args:
+        start_date: Startdatum im Format 'YYYY-MM-DD'
+        end_date: Enddatum im Format 'YYYY-MM-DD' (optional, bis heute wenn None)
+        initial_balance: Anfangskapital für den Backtest
+        
+    Returns:
+        Dictionary mit Backtest-Ergebnissen
+    \"\"\"
+    try:
+        logger.info(f"Starte Backtest von {start_date} bis {end_date or 'heute'}")
+        
+        # Lade historische Daten
+        market_data = {}
+        for symbol in self.symbols:
+            df = self.data_collector.get_historical_klines(
+                symbol=symbol,
+                interval=self.timeframe,
+                start_str=start_date,
+                end_str=end_date
+            )
+            
+            if df.empty:
+                logger.warning(f"Keine Daten für {symbol} gefunden")
+                continue
+            
+            # Füge technische Indikatoren hinzu
+            df = self.indicators.add_all_indicators(df)
+            
+            # Berechne Signale
+            df = self.strategy.generate_signals(df)
+            
+            market_data[symbol] = df
+        
+        # Initialisiere Backtest-Variablen
+        balance = initial_balance
+        positions = {}
+        trades = []
+        equity_curve = []
+        
+        # Durchlaufe jeden Zeitpunkt
+        timestamps = sorted(set([ts for df in market_data.values() for ts in df.index]))
+        
+        for ts in timestamps:
+            # Aktualisiere Equity-Curve
+            current_equity = balance
+            for symbol, pos in positions.items():
+                if symbol in market_data and ts in market_data[symbol].index:
+                    current_price = market_data[symbol].loc[ts, 'close']
+                    current_equity += pos['quantity'] * (current_price - pos['entry_price'])
+            
+            equity_curve.append((ts, current_equity))
+            
+            # Prüfe offene Positionen
+            for symbol, pos in list(positions.items()):
+                if symbol in market_data and ts in market_data[symbol].index:
+                    current_price = market_data[symbol].loc[ts, 'close']
+                    
+                    # Prüfe Stop-Loss
+                    if current_price <= pos['stop_loss']:
+                        # Schließe Position
+                        pnl = (current_price - pos['entry_price']) * pos['quantity']
+                        balance += pos['quantity'] * current_price
+                        
+                        trades.append({
+                            'symbol': symbol,
+                            'entry_time': pos['entry_time'],
+                            'exit_time': ts,
+                            'entry_price': pos['entry_price'],
+                            'exit_price': current_price,
+                            'quantity': pos['quantity'],
+                            'pnl': pnl,
+                            'exit_reason': 'stop_loss'
+                        })
+                        
+                        del positions[symbol]
+                        logger.debug(f"Backtest: Stop-Loss für {symbol} bei {current_price}")
+                    
+                    # Prüfe Take-Profit
+                    elif current_price >= pos['take_profit']:
+                        # Schließe Position
+                        pnl = (current_price - pos['entry_price']) * pos['quantity']
+                        balance += pos['quantity'] * current_price
+                        
+                        trades.append({
+                            'symbol': symbol,
+                            'entry_time': pos['entry_time'],
+                            'exit_time': ts,
+                            'entry_price': pos['entry_price'],
+                            'exit_price': current_price,
+                            'quantity': pos['quantity'],
+                            'pnl': pnl,
+                            'exit_reason': 'take_profit'
+                        })
+                        
+                        del positions[symbol]
+                        logger.debug(f"Backtest: Take-Profit für {symbol} bei {current_price}")
+            
+            # Suche nach neuen Signalen
+            for symbol, df in market_data.items():
+                if ts in df.index:
+                    row = df.loc[ts]
+                    signal = row.get('signal', 0)
+                    
+                    # Überprüfe, ob signal None ist
+                    if signal is None:
+                        signal = 0
+                    
+                    # Kaufsignal und keine bestehende Position
+                    if signal > 0 and symbol not in positions and len(positions) < self.max_positions:
+                        current_price = row['close']
+                        
+                        # Berechne Stop-Loss und Take-Profit
+                        stop_loss = self.strategy.get_stop_loss_price(df.loc[:ts], current_price, is_long=True)
+                        take_profit = self.strategy.calculate_take_profit(current_price, stop_loss)
+                        
+                        # Berechne Positionsgröße
+                        risk_amount = balance * (self.risk_percentage / 100)
+                        price_risk = current_price - stop_loss
+                        quantity = risk_amount / price_risk if price_risk > 0 else 0
+                        
+                        # Prüfe, ob genügend Guthaben vorhanden ist
+                        if quantity > 0 and quantity * current_price <= balance:
+                            # Öffne Position
+                            positions[symbol] = {
+                                'entry_price': current_price,
+                                'quantity': quantity,
+                                'stop_loss': stop_loss,
+                                'take_profit': take_profit,
+                                'entry_time': ts
+                            }
+                            
+                            # Ziehe Geld vom Guthaben ab
+                            balance -= quantity * current_price
+                            
+                            logger.debug(f"Backtest: Position in {symbol} eröffnet zu {current_price}")
+                    
+                    # Verkaufssignal und bestehende Position
+                    elif signal < 0 and symbol in positions:
+                        current_price = row['close']
+                        pos = positions[symbol]
+                        
+                        # Schließe Position
+                        pnl = (current_price - pos['entry_price']) * pos['quantity']
+                        balance += pos['quantity'] * current_price
+                        
+                        trades.append({
+                            'symbol': symbol,
+                            'entry_time': pos['entry_time'],
+                            'exit_time': ts,
+                            'entry_price': pos['entry_price'],
+                            'exit_price': current_price,
+                            'quantity': pos['quantity'],
+                            'pnl': pnl,
+                            'exit_reason': 'signal'
+                        })
+                        
+                        del positions[symbol]
+                        logger.debug(f"Backtest: Position in {symbol} geschlossen zu {current_price}")
+        
+        # Schließe alle verbleibenden Positionen zum letzten Preis
+        for symbol, pos in list(positions.items()):
+            if symbol in market_data:
+                last_price = market_data[symbol].iloc[-1]['close']
+                
+                # Schließe Position
+                pnl = (last_price - pos['entry_price']) * pos['quantity']
+                balance += pos['quantity'] * last_price
+                
+                trades.append({
+                    'symbol': symbol,
+                    'entry_time': pos['entry_time'],
+                    'exit_time': timestamps[-1],
+                    'entry_price': pos['entry_price'],
+                    'exit_price': last_price,
+                    'quantity': pos['quantity'],
+                    'pnl': pnl,
+                    'exit_reason': 'end_of_test'
+                })
+                
+                logger.debug(f"Backtest: Position in {symbol} am Ende geschlossen zu {last_price}")
+        
+        # Berechne Statistiken
+        total_trades = len(trades)
+        winning_trades = len([t for t in trades if t['pnl'] > 0])
+        
+        if total_trades > 0:
+            win_rate = winning_trades / total_trades * 100
+        else:
+            win_rate = 0
+        
+        # Berechne Rendite
+        final_balance = balance
+        return_percentage = (final_balance / initial_balance - 1) * 100
+        
+        # Berechne Drawdowns
+        if equity_curve:
+            equity_values = [e[1] for e in equity_curve]
+            max_drawdown = 0
+            peak = equity_values[0]
+            
+            for value in equity_values:
+                if value > peak:
+                    peak = value
+                drawdown = (peak - value) / peak * 100
+                max_drawdown = max(max_drawdown, drawdown)
+        else:
+            max_drawdown = 0
+        
+        # Berechne Sharpe Ratio
+        if len(equity_curve) > 1:
+            returns = []
+            for i in range(1, len(equity_curve)):
+                prev_value = equity_curve[i-1][1]
+                curr_value = equity_curve[i][1]
+                daily_return = (curr_value / prev_value) - 1
+                returns.append(daily_return)
+            
+            if returns:
+                mean_return = np.mean(returns)
+                std_return = np.std(returns)
+                sharpe_ratio = mean_return / std_return * np.sqrt(252) if std_return > 0 else 0
+            else:
+                sharpe_ratio = 0
+        else:
+            sharpe_ratio = 0
+        
+        # Ergebnisse zusammenstellen
+        results = {
+            'initial_balance': initial_balance,
+            'final_balance': final_balance,
+            'return_percentage': return_percentage,
+            'total_trades': total_trades,
+            'winning_trades': winning_trades,
+            'win_rate': win_rate,
+            'max_drawdown': max_drawdown,
+            'sharpe_ratio': sharpe_ratio,
+            'trades': trades,
+            'equity_curve': equity_curve
+        }
+        
+        logger.info(f"Backtest abgeschlossen, Endergebnis: {return_percentage:.2f}% Rendite")
+        return results
+        
+    except Exception as e:
+        logger.error(f"Fehler beim Ausführen des Backtests: {e}")
+        return {}
+\"\"\"
