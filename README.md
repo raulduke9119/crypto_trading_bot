@@ -1,242 +1,136 @@
 # Binance Trading Bot
 
-Dieser optimierte Trading Bot für Binance ermöglicht automatisiertes Kryptowährungshandel mit einer robusten Multi-Indikator-Strategie und fortschrittlichem Risikomanagement.
+A cryptocurrency trading bot that automates trading strategies on the Binance exchange platform. This bot implements various technical indicators and trading strategies with real-time data analysis for cryptocurrency trading.
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
-![Python](https://img.shields.io/badge/python-3.8%2B-green)
-![License](https://img.shields.io/badge/license-MIT-orange)
+## Features
 
-## Übersicht
+- **Real-time Data Collection**: Fetches and processes cryptocurrency market data from Binance
+- **Technical Analysis**: Implements multiple technical indicators (RSI, MACD, Bollinger Bands, etc.)
+- **Strategy Implementation**: Includes multi-indicator strategies and DOGEBTC high-frequency strategies
+- **Risk Management**: Implements trailing stops, maximum drawdown limits, and position size management
+- **Backtesting**: Tests strategies on historical data before live trading
+- **Machine Learning Integration**: Optional ML prediction models for enhanced trading signals
+- **Testnet Support**: Safely test trading strategies on Binance Testnet
 
-Der Bot kombiniert mehrere technische Indikatoren, um profitable Handelssignale zu generieren und nutzt eine modulare Architektur für einfache Erweiterbarkeit:
+## Project Structure
 
-- **Datensammlung**: Abrufen historischer und Echtzeit-Marktdaten von Binance
-- **Technische Indikatoren**: Fortschrittliche Berechnung von SMA, EMA, RSI, MACD und Bollinger Bands
-- **Handelsstrategien**: Optimierte Multi-Indikator-Strategie mit adaptiver Signalgewichtung
-- **Maschinelles Lernen** (optional): KI-gestützte Vorhersagemodelle für Preisbewegungen
-- **Order-Ausführung**: Intelligente Platzierung und Verwaltung von Handelsaufträgen
-- **Backtesting**: Umfassende Evaluation von Strategien mit historischen Daten
+```
+├── config/                  # Configuration files
+│   └── config.py            # Main configuration settings
+├── data/                    # Data handling modules
+│   ├── data_collector.py    # Market data collection from Binance
+│   └── indicators.py        # Technical indicators implementation
+├── models/                  # Machine learning models
+│   └── prediction_model.py  # Price prediction models
+├── strategies/              # Trading strategies
+│   ├── base_strategy.py             # Base strategy class
+│   ├── multi_indicator_strategy.py  # Multi-indicator strategy implementation
+│   └── dogebtc_hf_strategy.py       # DOGEBTC HF strategy implementation
+├── utils/                   # Utility modules
+│   ├── logger.py            # Logging utilities
+│   └── order_executor.py    # Order execution handler
+├── tests/                   # Test scripts
+│   └── test_indicators_demo.py  # Demo for technical indicators
+├── logs/                    # Trading logs
+├── trading_bot.py           # Main trading bot class
+├── run_bot.py               # Entry point for running the bot
+├── test_trading_workflow.py # End-to-end testing script
+└── requirements.txt         # Project dependencies
+```
 
-## Optimierte Handelsstrategie
+## Setup Instructions
 
-Die aktuelle Version implementiert eine verbesserte Multi-Indikator-Strategie:
+### Prerequisites
 
-- **Kurzfristiger RSI (2-Perioden)** für präzise Mean-Reversion-Signale
-- **MACD-Histogramm-Analyse** zur Trendbestimmung und Früherkennung von Umkehrungen
-- **Bollinger-Band-Signale** für Ausbruchs- und Squeeze-Erkennung
-- **Volumenvalidierung** mit anomalie-basierter Erkennung wichtiger Marktbewegungen
-- **Trailing-Stop-Mechanismus** für optimierte Gewinnmitnahme und Verlustbegrenzung
-- **Adaptive Volatiltätsanpassung** der Signalstärke für verschiedene Marktbedingungen
-
-## Hauptfunktionen
-
-- Parallel-Trading für mehrere Kryptowährungspaare mit konfigurierbaren Intervallen
-- Umfassendes Risikomanagement mit Positionsgrößenbegrenzung und Drawdown-Schutz
-- Hochleistungsfähiges Backtesting-Framework mit detaillierter Performance-Analyse
-- Robuste Fehlerbehandlung für zuverlässigen 24/7-Betrieb
-- Umfangreiche Logging- und Performance-Überwachungsfunktionen
-- Optional: KI-gestützte Signalverstärkung und Marktanalyse
-
-## Getting Started
-
-### Voraussetzungen
-
-- Python 3.8 oder höher
-- Pip (Python Package Manager)
-- Binance-Konto mit API-Schlüsseln
+- Python 3.8 or higher
+- Binance account (or Testnet account for testing)
+- API key and secret from Binance
 
 ### Installation
 
-1. Repository klonen:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/binance_trading_bot.git
+   cd binance_trading_bot
+   ```
+
+2. Create and activate a virtual environment:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Create a `.env` file in the project root directory:
+   ```
+   BINANCE_API_KEY=your_api_key
+   BINANCE_API_SECRET=your_api_secret
+   BINANCE_TESTNET_API_KEY=your_testnet_api_key
+   BINANCE_TESTNET_API_SECRET=your_testnet_api_secret
+   ```
+
+## Usage
+
+### Running Tests
+
+Before live trading, test the bot's functionality:
 
 ```bash
-git clone https://github.com/yourusername/binance-trading-bot.git
-cd binance-trading-bot
+python test_trading_workflow.py
 ```
 
-1. Virtual Environment erstellen und aktivieren:
+This will run a complete end-to-end test of all components, including:
+- API connection
+- Data collection
+- Technical indicator calculation
+- Strategy signal generation
+- Order execution (simulation mode)
+
+### Running the Bot
+
+To start the trading bot in backtest mode:
 
 ```bash
-python -m venv venv
-
-# Unter Linux/Mac
-source venv/bin/activate
-
-# Unter Windows
-venv\Scripts\activate
+python run_bot.py --mode backtest --symbols BTCUSDT ETHUSDT --start-date 2023-01-01
 ```
 
-1. Abhängigkeiten installieren:
+To run in live trading mode (use with caution):
 
 ```bash
-pip install -r requirements.txt
+python run_bot.py --mode live --symbols BTCUSDT --interval 15
 ```
 
-1. Umgebungsvariablen konfigurieren:
-   - Kopiere die `.env.example` Datei zu `.env`
-   - Trage deine Binance API-Schlüssel und andere Konfigurationen ein
+### Command Line Options
 
-```bash
-cp .env.example .env
-# Anschließend editieren mit deinem bevorzugten Texteditor
-```
+- `--mode`: `backtest` or `live` (default: `backtest`)
+- `--symbols`: Trading pairs to watch (e.g., `BTCUSDT ETHUSDT`)
+- `--interval`: Update interval in minutes for live mode (default: 15)
+- `--start-date`: Start date for backtest (format: YYYY-MM-DD)
+- `--end-date`: End date for backtest (format: YYYY-MM-DD)
+- `--initial-balance`: Initial balance for backtest (default: 1000)
+- `--use-ml`: Enable machine learning predictions
 
-### Konfiguration
+## Risk Warning
 
-Die wichtigsten Einstellungen können in der `config/config.py` angepasst werden:
+This trading bot is provided for educational and research purposes only. Cryptocurrency trading carries significant risk, and you should never invest money that you cannot afford to lose. The authors take no responsibility for financial losses incurred through the use of this software.
 
-```python
-# Trading-Paare konfigurieren
-TRADING_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
+## Development
 
-# Risikomanagement-Parameter
-MAX_POSITIONS = 2        # Maximale gleichzeitige Positionen
-RISK_PERCENTAGE = 1.0    # Risiko pro Trade in Prozent
-MAX_DRAWDOWN_PCT = 5.0   # Maximaler Drawdown in Prozent
+### Adding a New Strategy
 
-# Strategie-Parameter
-RSI_BUY_THRESHOLD = 15   # RSI-Kaufsignal-Schwelle
-RSI_SELL_THRESHOLD = 85  # RSI-Verkaufssignal-Schwelle
-```
+1. Create a new strategy file in the `strategies` directory
+2. Extend the `BaseStrategy` class
+3. Implement the `generate_signals` method
+4. Update the `should_buy` and `should_sell` methods
 
-### Trading-Bot starten
+### Contributing
 
-1. **Backtesting** - Strategie mit historischen Daten testen:
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-```bash
-python backtest.py
-```
+## License
 
-2. **Live-Trading** - Echtzeit-Trading auf Binance:
-
-```bash
-python trading_bot.py
-```
-
-3. **Paper-Trading** - Simulation ohne echtes Geld:
-
-```bash
-python trading_bot.py --paper-trading
-```
-
-### Git Setup
-
-Für den ersten Commit und Push:
-
-```bash
-# Git-Repository initialisieren (falls nicht geklont)
-git init
-
-# Änderungen hinzufügen
-git add .
-
-# Commit erstellen
-git commit -m "Initial commit: Optimized multi-indicator strategy with improved error handling"
-
-# Remote hinzufügen (falls nicht geklont)
-git remote add origin https://github.com/yourusername/binance-trading-bot.git
-
-# Änderungen pushen
-git push -u origin main
-```
-
-## Erweiterte Funktionen
-
-### Kryptowährungspaare und Parameter
-
-Der Bot kann mit verschiedenen Parametern konfiguriert werden:
-
-```bash
-python trading_bot.py --symbols BTCUSDT ETHUSDT SOLUSDT --interval 15 --risk 1.5
-```
-
-### Verfügbare Parameter
-
-- `--symbols`: Liste der Trading-Paare (z.B. `BTCUSDT ETHUSDT`)
-- `--interval`: Update-Intervall in Minuten (Standard: 5)
-- `--risk`: Risikoprozentsatz pro Trade (Standard: 1.0)
-- `--max-positions`: Maximale gleichzeitige Positionen (Standard: 2)
-- `--mode`: Betriebsmodus `live`, `paper` oder `backtest` (Standard: `paper`)
-- `--start-date`: Startdatum für Backtest (Format: YYYY-MM-DD)
-- `--end-date`: Enddatum für Backtest (optional)
-- `--initial-balance`: Anfangskapital für Backtest (Standard: 1000.0 USDT)
-- `--use-ml`: ML-Vorhersagen aktivieren (Flag)
-
-## Strategie-Optimierung
-
-Zur Optimierung der Strategie-Parameter kann das Optimierungsskript verwendet werden:
-
-```bash
-python optimize_strategy.py --symbol BTCUSDT --period 90d
-```
-
-Dies führt eine Grid-Search für die besten Parameter durch und speichert die Ergebnisse.
-
-## Projektstruktur
-
-```
-binance_trading_bot/
-├── config/
-│   └── config.py         # Konfigurationsparameter
-├── data/
-│   ├── data_collector.py # Datenabruf von Binance
-│   └── indicators.py     # Technische Indikatoren
-├── strategies/
-│   ├── base_strategy.py    # Basis-Strategieklasse
-│   └── multi_indicator_strategy.py # Multi-Indikator-Strategie
-├── utils/
-│   ├── logger.py         # Logging-Funktionalität
-│   └── order_executor.py # Order-Ausführung
-├── trading_bot.py        # Hauptanwendung
-├── backtest.py           # Backtesting-Tool
-├── optimize_strategy.py  # Strategie-Optimierer
-├── requirements.txt      # Abhängigkeiten
-└── README.md             # Dokumentation
-```
-
-## Sicherheitshinweise
-
-- **WICHTIG**: Verwende zunächst den Paper-Trading-Modus, um die Funktionalität ohne finanzielles Risiko zu testen
-- Speichere API-Schlüssel ausschließlich in der `.env`-Datei (niemals im Code)
-- Beschränke die API-Berechtigungen in deinem Binance-Konto auf das Nötigste
-
-## Robuste Fehlerbehandlung
-
-Der Bot implementiert umfassende Fehlerbehandlung, um auch bei instabilen Marktbedingungen zuverlässig zu funktionieren:
-
-- **Safe Type Handling**: Verhindert Abstürze bei None-Werten oder NaN-Daten
-- **Verbesserte Logging**: Detailliertes Logging mit Stack-Traces für bessere Fehleranalyse
-- **Automatische Wiederherstellung**: Automatische Wiederaufnahme nach Verbindungsproblemen
-- **Daten-Validierung**: Umfangreiche Prüfung auf fehlende oder ungültige Daten
-
-
-## Risikomanagement
-
-Der Bot verwendet folgende Risikomanagement-Techniken:
-
-- Prozentuales Risiko pro Trade (konfigurierbar)
-- Stop-Loss-Orders für alle Positionen
-- Take-Profit-Orders für Gewinnmitnahme
-- Automatische Positionsgrößenberechnung basierend auf Volatilität
-- Begrenzung der maximalen Anzahl gleichzeitiger Positionen
-
-## Fehlerbehandlung
-
-Der Bot behandelt potenzielle `None`-Werte in Vergleichsoperationen, um den Fehler `TypeError: '>' not supported between instances of 'NoneType' and 'int'` zu vermeiden:
-
-- Explizite Prüfung vor Vergleichen: `if value is not None and value > x`
-- Standardwerte für fehlende Daten: `int(value or default_value)`
-- Validierung aller API-Rückgaben vor der Verwendung
-
-## Haftungsausschluss
-
-Dieser Bot ist nur für Bildungs- und Forschungszwecke gedacht. Der Handel mit Kryptowährungen birgt erhebliche finanzielle Risiken. Verwende diesen Bot niemals mit mehr Kapital, als du bereit bist zu verlieren.
-
-## Weiterentwicklung
-
-Potenzielle Verbesserungen:
-- Implementierung weiterer Strategien
-- Optimierung der ML-Modelle
-- Web-Interface zur Überwachung
-- Integration weiterer Börsen
-- Strategie-Optimierung mit genetischen Algorithmen
+This project is licensed under the MIT License - see the LICENSE file for details.

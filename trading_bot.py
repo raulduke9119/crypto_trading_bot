@@ -45,7 +45,8 @@ class TradingBot:
                 risk_percentage: float = RISK_PERCENTAGE,
                 max_positions: int = MAX_POSITIONS,
                 initial_capital: float = INITIAL_CAPITAL,
-                use_ml: bool = USE_ML):
+                use_ml: bool = USE_ML,
+                pattern_name: str = "default_pattern.json"):
         """
         Initialisiert den Trading Bot.
         
@@ -59,6 +60,7 @@ class TradingBot:
             max_positions: Maximale Anzahl gleichzeitiger Positionen
             initial_capital: Anfangskapital
             use_ml: Ob ML-Vorhersagen verwendet werden sollen
+            pattern_name: Name des zu verwendenden Trading-Patterns
         """
         self.api_key = api_key
         self.api_secret = api_secret
@@ -69,6 +71,7 @@ class TradingBot:
         self.max_positions = max_positions
         self.initial_capital = initial_capital
         self.use_ml = use_ml
+        self.pattern_name = pattern_name
         
         # Prüfe API-Schlüssel
         if not api_key or not api_secret:
@@ -86,7 +89,14 @@ class TradingBot:
         # Initialisiere Komponenten
         self.data_collector = DataCollector(self.client)
         self.indicators = TechnicalIndicators()
-        self.strategy = MultiIndicatorStrategy(risk_percentage, max_positions, use_ml)
+        self.strategy = MultiIndicatorStrategy(
+            risk_percentage, 
+            max_positions, 
+            use_ml,
+            trailing_stop_pct=1.5,
+            max_drawdown_pct=5.0,
+            pattern_name=pattern_name
+        )
         self.order_executor = OrderExecutor(self.client)
         
         # Initialisiere Prediction Models für jeden Symbol
@@ -325,40 +335,18 @@ class TradingBot:
                                 continue
                             
                             # Prüfe auf Handelssignale
-                            signal = self.strategy.evaluate_position(current_data)
+                            position_update = self.strategy.evaluate_position(
+                                position=trades[-1] if trades else None,
+                                current_data=current_data
+                            )
                             
-                            if signal == 'BUY' and len(trades) < self.max_positions:
-                                # Simuliere Kauf
+                            # Prüfe ob Position geschlossen werden soll
+                            if position_update.get('should_close', False):
+                                # Simuliere Verkauf
                                 try:
                                     price = float(current_data['close'])
-                                    position_size = (balance * self.risk_percentage / 100) / price
-                                    cost = position_size * price
-                                    
-                                    if cost <= balance:
-                                        balance -= cost
-                                        trades.append({
-                                            'symbol': symbol,
-                                            'type': 'BUY',
-                                            'entry_price': price,
-                                            'size': position_size,
-                                            'entry_date': date_str,
-                                            'cost': cost
-                                        })
-                                        logger.info(
-                                            f"Kauf: {symbol} zu {price:.2f} USDT, "
-                                            f"Größe: {position_size:.8f}, "
-                                            f"Indikatoren: MACD={current_data.get('macd_hist', 'N/A'):.2f}, "
-                                            f"RSI={current_data.get('rsi', 'N/A'):.2f}"
-                                        )
-                                except Exception as e:
-                                    logger.error(f"Fehler beim Kaufsignal für {symbol}: {e}")
-                            
-                            elif signal == 'SELL':
-                                # Schließe offene Positionen
-                                for trade in trades[:]:  # Kopie der Liste für sichere Iteration
-                                    if trade['symbol'] == symbol:
-                                        try:
-                                            price = float(current_data['close'])
+                                    for trade in trades[:]:  # Kopie der Liste für sichere Iteration
+                                        if trade['symbol'] == symbol:
                                             revenue = trade['size'] * price
                                             pnl = revenue - trade['cost']
                                             balance += revenue
@@ -373,21 +361,50 @@ class TradingBot:
                                                 'exit_price': price,
                                                 'exit_date': date_str,
                                                 'pnl': pnl,
-                                                'pnl_percentage': (pnl / trade['cost']) * 100
+                                                'pnl_percentage': (pnl / trade['cost']) * 100,
+                                                'close_reason': position_update.get('close_reason', 'signal')
                                             })
                                             
                                             trades.remove(trade)
                                             logger.info(
                                                 f"Verkauf: {symbol} zu {price:.2f} USDT, "
                                                 f"PnL: {pnl:.2f} USDT ({(pnl / trade['cost'] * 100):.2f}%), "
-                                                f"Indikatoren: MACD={current_data.get('macd_hist', 'N/A'):.2f}, "
-                                                f"RSI={current_data.get('rsi', 'N/A'):.2f}"
+                                                f"Grund: {position_update.get('close_reason', 'signal')}"
                                             )
                                             
                                             if balance > max_balance:
                                                 max_balance = balance
-                                        except Exception as e:
-                                            logger.error(f"Fehler beim Verkaufssignal für {symbol}: {e}")
+                                except Exception as e:
+                                    logger.error(f"Fehler beim Verkaufssignal für {symbol}: {e}")
+                            
+                            # Prüfe auf Kaufsignal wenn keine Position offen ist
+                            elif not trades:
+                                should_buy, buy_strength = self.strategy.should_buy(pd.DataFrame([current_data]))
+                                if should_buy:
+                                    # Simuliere Kauf
+                                    try:
+                                        price = float(current_data['close'])
+                                        position_size = (balance * self.risk_percentage / 100) / price
+                                        cost = position_size * price
+                                        
+                                        if cost <= balance:
+                                            balance -= cost
+                                            trades.append({
+                                                'symbol': symbol,
+                                                'type': 'BUY',
+                                                'entry_price': price,
+                                                'size': position_size,
+                                                'entry_date': date_str,
+                                                'cost': cost,
+                                                'signal_strength': buy_strength
+                                            })
+                                            logger.info(
+                                                f"Kauf: {symbol} zu {price:.2f} USDT, "
+                                                f"Größe: {position_size:.8f}, "
+                                                f"Signal-Stärke: {buy_strength:.1f}"
+                                            )
+                                    except Exception as e:
+                                        logger.error(f"Fehler beim Kaufsignal für {symbol}: {e}")
                         except Exception as e:
                             logger.error(f"Fehler bei der Verarbeitung von {symbol} am {date_str}: {e}")
                     
@@ -672,20 +689,3 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Fehler bei der Sharpe Ratio Berechnung: {e}")
             return 0.0
-            for symbol, df in market_data.items():
-                # Stelle sicher, dass genügend Daten vorhanden sind
-                if len(df) < 100:  # Benötige vernünftige Datenmenge
-                    logger.warning(f"Nicht genügend Daten zum Trainieren des Modells für {symbol}")
-                    continue
-                
-                # Trainiere das Modell
-                if symbol in self.prediction_models:
-                    success = self.prediction_models[symbol].train(df)
-                    
-                    if success:
-                        logger.info(f"Modell für {symbol} trainiert")
-                    else:
-                        logger.warning(f"Fehler beim Trainieren des Modells für {symbol}")
-                
-        except Exception as e:
-            logger.error(f"Fehler beim Trainieren der Vorhersagemodelle: {e}")

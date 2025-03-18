@@ -11,7 +11,7 @@ import logging
 load_dotenv()
 
 # API-Konfiguration
-def validate_api_keys(use_testnet: bool = False) -> Tuple[str, str]:
+def validate_api_keys(use_testnet: bool = True) -> Tuple[str, str]:
     if use_testnet:
         api_key = os.getenv("BINANCE_TESTNET_API_KEY")
         api_secret = os.getenv("BINANCE_TESTNET_API_SECRET")
@@ -28,11 +28,11 @@ def validate_api_keys(use_testnet: bool = False) -> Tuple[str, str]:
         )
     return api_key, api_secret
 
-# Verwende Live-Netzwerk für Backtesting, Testnet nur für Live-Trading
-USE_TESTNET: bool = False  # False für Backtesting
+# Verwende Testnet für Tests
+USE_TESTNET: bool = True  # Changed to True for testing
 API_KEY, API_SECRET = validate_api_keys(USE_TESTNET)
 
-# Binance-Konfiguration (verwendet von test_indicators_demo.py)
+# Binance-Konfiguration
 BINANCE_CONFIG: Dict[str, Union[str, bool]] = {
     "API_KEY": API_KEY,
     "API_SECRET": API_SECRET,

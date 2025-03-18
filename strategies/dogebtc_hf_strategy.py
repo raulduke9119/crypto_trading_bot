@@ -49,89 +49,88 @@ class DogebtcHFStrategy(BaseStrategy):
         
         # DOGEBTC-spezifische optimierte Parameter (basierend auf Perplexity-Empfehlungen)
         # RSI-Parameter
-        self.rsi_period = 7  # Kurzperioden-RSI für schnellere Reaktion auf DOGEBTC-Volatilität
-        self.rsi_ultra_period = 2  # Ultra-Kurzperiode für schnelle HF-Signale
-        self.rsi_oversold = 30  # Überverkauft-Schwellenwert
-        self.rsi_overbought = 70  # Überkauft-Schwellenwert
+        self.rsi_period = 7
+        self.rsi_overbought = 72
+        self.rsi_oversold = 28
+        self.rsi_ultra_period = 2  # Sehr kurzperiodiger RSI für Mean-Reversion
         
-        # MACD-Parameter
-        self.macd_fast = 6  # Schneller EMA (5-7 empfohlen für 5m)
-        self.macd_slow = 22  # Langsamer EMA (20-25 empfohlen für 5m)
-        self.macd_signal = 4  # Signal-Linie (3-5 empfohlen für 5m)
+        # MACD-Parameter 
+        self.macd_fast = 6
+        self.macd_slow = 13
+        self.macd_signal = 4
         
-        # Bollinger Bands-Parameter
-        self.bb_period = 20  # 20 ist empfohlen für 5m
-        self.bb_std = 1.8  # Standardabweichung zwischen 1.5-2.0 empfohlen für HFT
+        # Bollinger-Band-Parameter
+        self.bb_period = 12
+        self.bb_std = 2.2
         
-        # Stochastik-Parameter für DOGEBTC
-        self.stoch_k = 8  # %K Periode (kürzer für HFT)
-        self.stoch_d = 3  # %D Periode
-        self.stoch_smooth = 3  # Glättungsperiode
+        # Stochastik-Parameter
+        self.stoch_k = 5 
+        self.stoch_d = 3
+        self.stoch_smooth = 2
         
-        # Volume Filter Parameter
-        self.volume_spike_threshold = 1.5  # Volumenanstieg-Schwellenwert (50% über Durchschnitt)
-        self.volume_trend_threshold = 1.2  # 20% Anstieg als Trend
+        # Volumen-Parameter
+        self.volume_spike_threshold = 1.8
         
-        logger.info(f"DOGEBTC HF-Strategie initialisiert: RSI={self.rsi_period}/{self.rsi_ultra_period}, "
-                   f"MACD={self.macd_fast}/{self.macd_slow}/{self.macd_signal}, BB={self.bb_period}/{self.bb_std}")
-
+        # Trading-Parameter
+        self.pattern_recognition = True
+        self.mean_reversion_mode = True
+        
+        logger.info(f"DOGEBTC HF-Strategie initialisiert: Risiko={risk_percent}%, Volatilitätsanpassung={adjust_for_volatility}")
+    
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Generiert Kauf- und Verkaufssignale basierend auf technischen Indikatoren
-        optimiert für DOGEBTC im 5-Minuten-Intervall.
+        Generiert Trading-Signale basierend auf mehreren Indikatoren,
+        speziell optimiert für DOGEBTC.
         
         Args:
-            df: DataFrame mit OHLCV-Daten und technischen Indikatoren
+            df: DataFrame mit OHLCV-Daten
             
         Returns:
-            DataFrame mit hinzugefügten Signal-Spalten
+            DataFrame mit hinzugefügten Signalspalten
         """
         try:
+            # Validiere Eingabedaten
             if df.empty:
-                logger.warning("Leeres DataFrame, keine Signale generiert")
+                logger.warning("DataFrame ist leer, keine Signale generiert")
                 return df
             
-            # Kopiere DataFrame, um Original nicht zu verändern
+            # Stelle sicher, dass wir mit einer Kopie arbeiten
             data = df.copy()
             
-            # Stelle sicher, dass alle benötigten Indikatoren vorhanden sind
-            required_columns = ['close', 'high', 'low', 'volume']
-            if not all(col in data.columns for col in required_columns):
-                logger.warning(f"Fehlende erforderliche Spalten in Daten. Verfügbar: {data.columns}")
-                return df
+            # --- 1. Stelle sicher, dass alle benötigten Indikatoren vorhanden sind ---
             
-            # --- 1. DOGEBTC-spezifische Indikatoren hinzufügen ---
+            # Initialisiere TechnicalIndicators, falls fehlende Indikatoren berechnet werden müssen
+            indicators = TechnicalIndicators()
             
-            # 1.1 Optimierter RSI (Kurzperiode für HF)
+            # 1.1 RSI überprüfen und berechnen wenn nötig
             if 'rsi' not in data.columns:
-                ti = TechnicalIndicators()
-                data = ti.add_rsi(data, self.rsi_period)
+                data = indicators.add_rsi(data)
+                
+            # Füge Ultra-Short RSI hinzu (für Mean-Reversion)
+            if 'rsi_ultra' not in data.columns:
+                # Erstelle eine temporäre RSI-Berechnung mit kurzem Zeitfenster
+                close_series = data['close'].copy()
+                delta = close_series.diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=self.rsi_ultra_period).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=self.rsi_ultra_period).mean()
+                rs = gain / loss.replace(0, float('nan'))  # Vermeide Division durch Null
+                data['rsi_ultra'] = 100 - (100 / (1 + rs))
+                data['rsi_ultra'] = data['rsi_ultra'].fillna(50)  # Neutrale RSI-Werte für NaN
             
-            # 1.2 Ultra-kurzer RSI für schnellere Reaktion
-            data = TechnicalIndicators.add_rsi(data, period=self.rsi_ultra_period, column_name='rsi_ultra')
+            # 1.2 MACD überprüfen und berechnen wenn nötig
+            macd_columns = ['macd', 'macd_signal', 'macd_hist']
+            if not all(col in data.columns for col in macd_columns):
+                data = indicators.add_macd(data)
             
-            # 1.3 Optimierter MACD mit angepassten Parametern für DOGEBTC
-            data = TechnicalIndicators.add_macd(
-                data, 
-                fast_period=self.macd_fast, 
-                slow_period=self.macd_slow, 
-                signal_period=self.macd_signal
-            )
-            
-            # 1.4 Optimierte Bollinger Bands
-            bb_columns = ['bb_upper', 'bb_middle', 'bb_lower', 'bb_width', 'bb_pct_b']
+            # 1.3 Bollinger Bands überprüfen und berechnen wenn nötig
+            bb_columns = ['bb_upper', 'bb_middle', 'bb_lower', 'bb_width']
             if not all(col in data.columns for col in bb_columns):
-                data = TechnicalIndicators.add_bollinger_bands(data, period=self.bb_period, std_dev=self.bb_std)
+                data = indicators.add_bollinger_bands(data)
             
             # 1.5 Stochastischer Oszillator für DOGEBTC optimiert
             stoch_columns = ['stoch_k', 'stoch_d']
             if not all(col in data.columns for col in stoch_columns):
-                data = TechnicalIndicators.add_stochastic(
-                    data, 
-                    k_period=self.stoch_k, 
-                    d_period=self.stoch_d, 
-                    smooth_k=self.stoch_smooth
-                )
+                data = indicators.add_stochastic(data)
             
             # --- 2. DOGEBTC-spezifische Signale generieren ---
             
@@ -236,39 +235,23 @@ class DogebtcHFStrategy(BaseStrategy):
             data['buy_strength'] = (buy_strength / max_buy_weight * 10).round(2)
             data['sell_strength'] = (sell_strength / max_sell_weight * 10).round(2)
             
-            # 2.5 Schwellenwerte verwenden (DOGEBTC-spezifisch)
-            buy_threshold = 3.0  # Optimiert für mehr Signale
-            sell_threshold = 3.5  # Etwas höher für besseren Schutz
+            # 2.5 Generiere finale Signale basierend auf Schwellenwerten
+            signal_threshold = 4.0  # Höherer Schwellenwert für präzisere Signale
             
-            # Finale Signale setzen
-            data['buy_signal'] = (data['buy_strength'] >= buy_threshold) & \
-                                 (data['buy_strength'] > data['sell_strength'] * 1.2)
+            # Kaufsignale mit höherer Präzision
+            data['buy_signal'] = data['buy_strength'] >= signal_threshold
             
-            data['sell_signal'] = (data['sell_strength'] >= sell_threshold) & \
-                                  (data['sell_strength'] > data['buy_strength'] * 1.2)
+            # Verkaufssignale mit höherer Präzision
+            data['sell_signal'] = data['sell_strength'] >= signal_threshold
             
-            # 2.6 Zusätzliche direkte DOGEBTC-spezifische Signale
-            direct_buy = (
-                (bb_lower_touch & (data['rsi_ultra'] < 30) & volume_spike) |
-                (macd_cross_up & (data['close'] > data['bb_lower']) & (data['rsi_ultra'] < 40)) |
-                (stoch_oversold & stoch_cross_up & (data['rsi_ultra'] < 40) & volume_trend_up)
-            )
+            # 2.6 Verkaufssignale haben Priorität über Kaufsignale
+            data.loc[data['sell_signal'], 'buy_signal'] = False
             
-            direct_sell = (
-                (bb_upper_touch & (data['rsi_ultra'] > 70) & volume_spike) |
-                (macd_cross_down & (data['close'] < data['bb_upper']) & (data['rsi_ultra'] > 60)) |
-                (stoch_overbought & stoch_cross_down & (data['rsi_ultra'] > 60) & volume_trend_up)
-            )
-            
-            # Kombiniere generierte Signale mit direkten Signalen
-            data['buy_signal'] = data['buy_signal'] | direct_buy
-            data['sell_signal'] = data['sell_signal'] | direct_sell
-            
+            logger.debug(f"DOGEBTC Signale generiert: {data['buy_signal'].sum()} Kaufsignale, {data['sell_signal'].sum()} Verkaufssignale")
             return data
             
         except Exception as e:
-            logger.error(f"Fehler bei der Signalgenerierung in DOGEBTC HF-Strategie: {e}")
-            # Rückgabe des ursprünglichen DataFrame bei Fehler
+            logger.error(f"Fehler bei der Signalgenerierung: {e}")
             return df
     
     def should_buy(self, data: pd.DataFrame, position: Optional[Dict] = None) -> Tuple[bool, float]:
@@ -298,10 +281,9 @@ class DogebtcHFStrategy(BaseStrategy):
         
         return should_buy, signal_strength
     
-    def should_sell(self, data: pd.DataFrame, position: Optional[Dict]) -> Tuple[bool, float]:
+    def should_sell(self, data: pd.DataFrame, position: Optional[Dict] = None) -> Tuple[bool, float]:
         """
-        Entscheidet, ob verkauft werden soll, basierend auf den generierten Signalen
-        oder Schutzmaßnahmen wie Trailing-Stop oder Max-Drawdown.
+        Entscheidet, ob verkauft werden soll, basierend auf den generierten Signalen.
         
         Args:
             data: DataFrame mit technischen Indikatoren und Signalen
@@ -316,110 +298,83 @@ class DogebtcHFStrategy(BaseStrategy):
         # Letzten Datenpunkt verwenden
         last_row = data.iloc[-1]
         
-        # Basis-Verkaufssignal
+        # Prüfe, ob ein Verkaufssignal vorliegt
         should_sell = last_row.get('sell_signal', False)
         signal_strength = last_row.get('sell_strength', 0.0)
         
-        # Erweiterte Schutzmaßnahmen
-        
-        # 1. Trailing-Stop-Loss (für Gewinnmitnahme)
-        if 'price' in position and 'highest_price' in position:
+        # Trailing-Stop-Loss-Logik für Gewinnmitnahme und Verlustbegrenzung
+        if position and 'entry_price' in position:
+            entry_price = position['entry_price']
             current_price = last_row['close']
-            entry_price = position['price']
-            highest_price = position['highest_price']
             
-            # Wenn Preis um x% unter Höchstpreis gefallen ist
-            trailing_stop_triggered = (
-                current_price < highest_price * (1 - self.trailing_stop_percent / 100) and
-                current_price > entry_price  # Nur wenn Position im Gewinn ist
-            )
+            # Berechne prozentuale Veränderung seit Einstieg
+            pct_change = (current_price - entry_price) / entry_price * 100
             
-            if trailing_stop_triggered:
-                logger.info(f"Trailing-Stop ausgelöst: Aktuell={current_price}, "
-                           f"Höchst={highest_price}, Differenz={((current_price/highest_price)-1)*100:.2f}%")
+            # Trailing-Stop-Loss: Verkaufe, wenn der Preis um x% vom Höchststand gefallen ist
+            if 'highest_price' in position and position['highest_price'] > entry_price:
+                trailing_stop_price = position['highest_price'] * (1 - self.trailing_stop_percent / 100)
+                if current_price <= trailing_stop_price:
+                    logger.info(f"Trailing-Stop ausgelöst: Aktuell {current_price}, Stop bei {trailing_stop_price:.2f}")
+                    should_sell = True
+                    signal_strength = 10.0  # Höchste Priorität für Stop-Loss
+            
+            # Maximaler Drawdown-Schutz
+            if pct_change < -self.max_drawdown_percent:
+                logger.info(f"Max-Drawdown-Schutz ausgelöst: {pct_change:.2f}% Verlust")
                 should_sell = True
-                signal_strength = max(signal_strength, 8.0)  # Hohe Signal-Priorität
-        
-        # 2. Maximaler Drawdown-Schutz (für Verlustbegrenzung)
-        if 'price' in position:
-            current_price = last_row['close']
-            entry_price = position['price']
-            
-            # Wenn Preis um x% unter Einstiegspreis gefallen ist
-            max_drawdown_triggered = (
-                current_price < entry_price * (1 - self.max_drawdown_percent / 100)
-            )
-            
-            if max_drawdown_triggered:
-                logger.info(f"Max-Drawdown ausgelöst: Aktuell={current_price}, "
-                           f"Einstieg={entry_price}, Differenz={((current_price/entry_price)-1)*100:.2f}%")
-                should_sell = True
-                signal_strength = max(signal_strength, 9.0)  # Höchste Signal-Priorität
+                signal_strength = 10.0  # Höchste Priorität für Drawdown-Schutz
         
         return should_sell, signal_strength
     
-    def calculate_position_size(self, data: pd.DataFrame, capital: float) -> float:
+    def calculate_position_size(self, 
+                               balance: float, 
+                               price: float, 
+                               risk_pct: Optional[float] = None, 
+                               volatility: Optional[float] = None) -> float:
         """
-        Berechnet die optimale Positionsgröße basierend auf Risiko und Volatilität.
+        Berechnet die optimale Positionsgröße basierend auf Risiko und optionaler Volatilitätsanpassung.
         
         Args:
-            data: DataFrame mit technischen Indikatoren
-            capital: Verfügbares Kapital
+            balance: Verfügbares Kapital
+            price: Aktueller Preis
+            risk_pct: Risikoprozentsatz (überschreibt den Standard)
+            volatility: Volatilität für Positionsgrößenanpassung
             
         Returns:
-            Optimale Positionsgröße in Prozent des Kapitals
+            Positionsgröße (Anzahl Coins)
         """
-        if data.empty:
-            return capital * (self.risk_percent / 100)
+        # Verwende den angegebenen Risikoprozentsatz oder den Standardwert
+        risk_percentage = risk_pct if risk_pct is not None else self.risk_percentage
         
-        position_size = capital * (self.risk_percent / 100)
+        # Basisberechnung der Positionsgröße
+        position_size = (balance * risk_percentage / 100) / price
         
-        # Volatilitätsanpassung wenn gewünscht
-        if self.adjust_for_volatility and 'atr_pct' in data.columns:
-            latest_volatility = data['atr_pct'].iloc[-1]
-            
-            # Vergleichen mit 20-Perioden-Durchschnitt
-            avg_volatility = data['atr_pct'].rolling(window=20).mean().iloc[-1]
-            
-            if not np.isnan(latest_volatility) and not np.isnan(avg_volatility) and avg_volatility > 0:
-                # Reduziert Position bei höherer Volatilität, erhöht bei niedrigerer
-                volatility_ratio = latest_volatility / avg_volatility
-                
-                # Begrenzen auf 0.5x - 1.5x des Standard-Risikos
-                volatility_factor = max(0.5, min(1.5, 1 / volatility_ratio))
-                position_size *= volatility_factor
-                
-                logger.debug(f"Volatilitätsanpassung: Faktor={volatility_factor:.2f}, "
-                            f"Aktuelle ATR={latest_volatility:.2f}%, Durchschnitt={avg_volatility:.2f}%")
+        # Volatilitätsanpassung, wenn aktiviert und Volatilität angegeben
+        if self.adjust_for_volatility and volatility is not None and volatility > 0:
+            # Anpassungsfaktor: Bei höherer Volatilität kleinere Position
+            volatility_factor = 1 / (1 + volatility)
+            position_size *= volatility_factor
+            logger.debug(f"Positionsgröße volatilitätsangepasst: Faktor {volatility_factor:.2f}")
         
         return position_size
-
-    def update_position(self, position: Dict, current_data: pd.DataFrame) -> Dict:
+    
+    def update_position(self, position: Dict, current_data: pd.Series) -> Dict:
         """
-        Aktualisiert die Positionsinformationen mit den neuesten Daten.
+        Aktualisiert die Positionsdaten für Trailing-Stop und andere Mechanismen.
         
         Args:
-            position: Aktuelle Position
+            position: Aktuelle Positionsdaten
             current_data: Aktuelle Marktdaten
             
         Returns:
-            Aktualisierte Position
+            Aktualisierte Positionsdaten
         """
-        if current_data.empty:
+        if not position:
             return position
         
-        current_price = current_data['close'].iloc[-1]
-        
-        # Aktualisiere Höchstpreis für Trailing-Stop
-        if 'highest_price' in position:
-            position['highest_price'] = max(position['highest_price'], current_price)
-        else:
+        # Aktualisiere höchsten Preis für Trailing-Stop-Loss
+        current_price = current_data['close']
+        if 'highest_price' not in position or current_price > position['highest_price']:
             position['highest_price'] = current_price
-        
-        # Aktualisiere aktuelle Kennzahlen
-        position['current_price'] = current_price
-        
-        if 'price' in position and position['price'] > 0:
-            position['current_pnl_pct'] = ((current_price / position['price']) - 1) * 100
-        
+            
         return position

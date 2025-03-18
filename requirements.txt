@@ -1,19 +1,33 @@
-# Core Dependencies
-python-binance==1.0.16
+# Binance Trading Bot Dependencies
+
+# Core libraries
+python-binance==1.0.19
 pandas==1.5.3
-numpy==1.24.3
+numpy==1.23.5
+matplotlib==3.7.1
+scikit-learn==1.2.2
+
+# Technical analysis
+pandas-ta==0.3.14b0
+
+# Environment variables
 python-dotenv==1.0.0
+
+# Data visualization and testing
+tqdm==4.65.0
+
+# Machine Learning (optional)
+tensorflow==2.12.0
+keras==2.12.0
+
+# Utils
+schedule==1.2.0
+joblib==1.2.0
 
 # Technical Analysis
 ta==0.10.2
-ta-lib==0.4.28
-
-# Machine Learning (Optional)
-scikit-learn==1.2.2
-tensorflow==2.12.0
 
 # Visualization and Scheduling
-matplotlib==3.7.1
 schedule==1.2.0
 
 # Testing and Type Checking

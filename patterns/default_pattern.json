@@ -1,0 +1,53 @@
+{
+    "name": "Default Pattern",
+    "description": "Standard-Pattern mit grundlegenden Trading-Regeln",
+    "buy_conditions": [
+        {
+            "name": "RSI Oversold",
+            "conditions": [
+                {"indicator": "rsi", "operator": "<", "value": 30}
+            ],
+            "weight": 3.0
+        },
+        {
+            "name": "MACD Crossover",
+            "conditions": [
+                {"indicator": "macd_hist", "operator": ">", "value": 0},
+                {"indicator": "macd_hist_prev", "operator": "<=", "value": 0}
+            ],
+            "weight": 2.0
+        },
+        {
+            "name": "Bollinger Bottom",
+            "conditions": [
+                {"indicator": "close", "operator": "<", "value_indicator": "bb_lower"}
+            ],
+            "weight": 2.5
+        }
+    ],
+    "sell_conditions": [
+        {
+            "name": "RSI Overbought",
+            "conditions": [
+                {"indicator": "rsi", "operator": ">", "value": 70}
+            ],
+            "weight": 3.0
+        },
+        {
+            "name": "MACD Crossover Down",
+            "conditions": [
+                {"indicator": "macd_hist", "operator": "<", "value": 0},
+                {"indicator": "macd_hist_prev", "operator": ">=", "value": 0}
+            ],
+            "weight": 2.0
+        },
+        {
+            "name": "Bollinger Top",
+            "conditions": [
+                {"indicator": "close", "operator": ">", "value_indicator": "bb_upper"}
+            ],
+            "weight": 2.5
+        }
+    ],
+    "signal_threshold": 4.0
+} 

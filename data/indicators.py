@@ -31,6 +31,19 @@ class TechnicalIndicators:
         self.config = config
         logger.info("Technische Indikatoren initialisiert")
     
+    def _safe_fillna(self, series: pd.Series, default_value: float = 0) -> pd.Series:
+        """
+        Sicheres Auffüllen von NaN-Werten mit Forward-Fill und Back-Fill.
+        
+        Args:
+            series: Pandas Series mit möglichen NaN-Werten
+            default_value: Standardwert für verbleibende NaN-Werte
+            
+        Returns:
+            Aufgefüllte Pandas Series
+        """
+        return series.ffill().bfill().fillna(default_value)
+    
     def add_all_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Fügt alle konfigurierten technischen Indikatoren zum DataFrame hinzu.
@@ -102,7 +115,7 @@ class TechnicalIndicators:
                     if sma is None or sma.isnull().all():
                         logger.warning(f"SMA-{period_name} konnte nicht berechnet werden")
                         continue
-                    df[f'sma_{period_name}'] = sma.fillna(method='ffill').fillna(close_series.mean())
+                    df[f'sma_{period_name}'] = self._safe_fillna(sma, close_series.mean())
                 except Exception as e:
                     logger.error(f"Fehler bei SMA-{period_name} Berechnung: {e}")
             
@@ -113,7 +126,7 @@ class TechnicalIndicators:
                     if ema is None or ema.isnull().all():
                         logger.warning(f"EMA-{period_name} konnte nicht berechnet werden, verwende SMA")
                         ema = pta.sma(close_series, length=length)
-                    df[f'ema_{period_name}'] = ema.fillna(method='ffill').fillna(close_series.mean())
+                    df[f'ema_{period_name}'] = self._safe_fillna(ema, close_series.mean())
                 except Exception as e:
                     logger.error(f"Fehler bei EMA-{period_name} Berechnung: {e}")
             
@@ -176,7 +189,7 @@ class TechnicalIndicators:
                     rsi = 100 - (100 / (1 + rs))
                 
                 # Validiere RSI-Werte
-                rsi = rsi.fillna(method='ffill').fillna(50)  # 50 als neutraler Wert
+                rsi = self._safe_fillna(rsi, 50)  # 50 als neutraler Wert
                 rsi = rsi.clip(0, 100)  # Beschränke Werte auf 0-100
                 
                 df['rsi'] = rsi
@@ -215,89 +228,43 @@ class TechnicalIndicators:
             DataFrame mit hinzugefügtem MACD
         """
         try:
-            # Validiere Eingabedaten
-            if df.empty:
-                logger.warning("DataFrame ist leer, überspringe MACD-Berechnung")
+            if df.empty or 'close' not in df.columns:
                 return df
             
-            if 'close' not in df.columns:
-                logger.error("'close' Spalte nicht im DataFrame gefunden")
-                return df
-            
-            # Konfigurationswerte mit Standardwerten
-            config = self.config.get('MACD', {})
-            fast_length = config.get('fast', 12)
-            slow_length = config.get('slow', 26)
-            signal_length = config.get('signal', 9)
-            
-            # Stelle sicher, dass das Close nicht None enthält
             close_series = df['close'].copy()
-            if close_series.isnull().any():
-                logger.warning("Null-Werte in close-Daten gefunden, fülle mit forward-fill auf")
-                close_series = close_series.ffill().fillna(0)
+            close_series = self._safe_fillna(close_series)
             
-            # Berechne EMAs mit expliziter Null-Wert-Behandlung
-            if len(close_series) < max(fast_length, slow_length):
-                logger.warning(f"Zu wenig Datenpunkte für EMA-Berechnung: {len(close_series)} < {max(fast_length, slow_length)}")
-                return df
-
+            config = self.config.get('MACD', {'fast': 12, 'slow': 26, 'signal': 9})
+            
             # Berechne Fast EMA
-            fast_ema = pta.ema(close_series, length=fast_length)
-            if fast_ema is None or fast_ema.isnull().all():
-                logger.warning("Fast EMA konnte nicht berechnet werden, verwende SMA")
-                fast_ema = pta.sma(close_series, length=fast_length)
-                if fast_ema is None or fast_ema.isnull().all():
-                    logger.error("Auch SMA konnte nicht berechnet werden")
-                    return df
-            fast_ema = fast_ema.fillna(method='ffill').fillna(method='bfill').fillna(close_series.mean())
+            fast_ema = pta.ema(close_series, length=config['fast'])
+            fast_ema = self._safe_fillna(fast_ema, close_series.mean())
             
             # Berechne Slow EMA
-            slow_ema = pta.ema(close_series, length=slow_length)
-            if slow_ema is None or slow_ema.isnull().all():
-                logger.warning("Slow EMA konnte nicht berechnet werden, verwende SMA")
-                slow_ema = pta.sma(close_series, length=slow_length)
-                if slow_ema is None or slow_ema.isnull().all():
-                    logger.error("Auch SMA konnte nicht berechnet werden")
-                    return df
-            slow_ema = slow_ema.fillna(method='ffill').fillna(method='bfill').fillna(close_series.mean())
+            slow_ema = pta.ema(close_series, length=config['slow'])
+            slow_ema = self._safe_fillna(slow_ema, close_series.mean())
             
-            # MACD-Linie berechnen
+            # MACD Line
             df['macd'] = fast_ema - slow_ema
+            df['macd'] = self._safe_fillna(df['macd'], 0)
             
-            # Signal-Linie berechnen
-            macd_series = df['macd'].fillna(method='ffill').fillna(0)
-            signal_line = pta.ema(macd_series, length=signal_length)
-            if signal_line is None or signal_line.isnull().all():
-                logger.error("Signal-Linie konnte nicht berechnet werden")
-                return df
-            df['macd_signal'] = signal_line.fillna(method='ffill').fillna(0)
+            # Signal Line
+            signal_line = pta.ema(df['macd'], length=config['signal'])
+            df['macd_signal'] = self._safe_fillna(signal_line, 0)
             
-            # Histogramm berechnen
+            # MACD Histogram
             df['macd_hist'] = df['macd'] - df['macd_signal']
             
-            # Signale berechnen mit sicherer Null-Wert-Behandlung
-            df['macd_cross_up'] = (df['macd'] > df['macd_signal']) & \
-                                 (df['macd'].shift(1).fillna(0) <= df['macd_signal'].shift(1).fillna(0))
-            df['macd_cross_down'] = (df['macd'] < df['macd_signal']) & \
-                                   (df['macd'].shift(1).fillna(0) >= df['macd_signal'].shift(1).fillna(0))
+            # MACD Crossover Signals
+            macd_shift = self._safe_fillna(df['macd'].shift(1), 0)
+            signal_shift = self._safe_fillna(df['macd_signal'].shift(1), 0)
             
-            # Überprüfe finale Datenqualität
-            macd_columns = ['macd', 'macd_signal', 'macd_hist']
-            nan_counts = {col: df[col].isnull().sum() for col in macd_columns}
-            if any(nan_counts.values()):
-                logger.warning(f"NaN-Werte in MACD-Indikatoren gefunden: {nan_counts}")
-                # Fülle verbleibende NaN-Werte
-                df[macd_columns] = df[macd_columns].fillna(0)
+            df['macd_cross_up'] = (df['macd'] > df['macd_signal']) & (macd_shift <= signal_shift)
+            df['macd_cross_down'] = (df['macd'] < df['macd_signal']) & (macd_shift >= signal_shift)
             
-            logger.debug("MACD erfolgreich hinzugefügt")
             return df
-            
         except Exception as e:
             logger.error(f"Fehler beim Berechnen des MACD: {e}")
-            # Stelle sicher, dass alle MACD-Spalten existieren
-            for col in ['macd', 'macd_signal', 'macd_hist', 'macd_cross_up', 'macd_cross_down']:
-                if col not in df.columns:
-                    df[col] = 0
             return df
     
     def add_bollinger_bands(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -311,72 +278,44 @@ class TechnicalIndicators:
             DataFrame mit hinzugefügten Bollinger Bands
         """
         try:
-            # Validiere Eingabedaten
-            if df.empty:
-                logger.warning("DataFrame ist leer, überspringe Bollinger Bands")
+            if df.empty or 'close' not in df.columns:
                 return df
             
-            if 'close' not in df.columns:
-                logger.error("'close' Spalte nicht im DataFrame gefunden")
-                return df
-            
-            # Stelle sicher, dass Close keine None-Werte enthält
             close_series = df['close'].copy()
-            if close_series.isnull().any():
-                logger.warning("Null-Werte in close-Daten gefunden, führe Bereinigung durch")
-                close_series = close_series.ffill().bfill()
+            close_series = self._safe_fillna(close_series)
             
-            # Konfigurationswerte mit Fehlerbehandlung
             bbands_config = self.config.get('BBANDS', {'period': 20, 'std_dev': 2.0})
-            period = bbands_config.get('period', 20)
-            std_dev = bbands_config.get('std_dev', 2.0)
             
-            # Prüfe, ob genügend Datenpunkte vorhanden sind
-            if len(close_series) < period:
-                logger.warning(f"Zu wenig Datenpunkte für Bollinger Bands: {len(close_series)} < {period}")
-                return df
+            sma = close_series.rolling(window=bbands_config['period']).mean()
+            std = close_series.rolling(window=bbands_config['period']).std()
             
-            # Berechne Bollinger Bands manuell, um mehr Kontrolle zu haben
-            sma = close_series.rolling(window=period).mean()
-            std = close_series.rolling(window=period).std()
-            
-            # Füge Bollinger Bands zum DataFrame hinzu
-            df['bb_upper'] = sma + (std * std_dev)
+            df['bb_upper'] = sma + (std * bbands_config['std_dev'])
             df['bb_middle'] = sma
-            df['bb_lower'] = sma - (std * std_dev)
+            df['bb_lower'] = sma - (std * bbands_config['std_dev'])
             
-            # Berechne Bollinger Band Width und %B mit Null-Wert-Prüfung
-            df['bb_width'] = df.apply(
-                lambda row: (row['bb_upper'] - row['bb_lower']) / row['bb_middle'] 
-                if pd.notnull(row['bb_middle']) and row['bb_middle'] != 0 else 0, 
-                axis=1
-            )
+            # Fill NaN values
+            bb_columns = ['bb_upper', 'bb_middle', 'bb_lower']
+            for col in bb_columns:
+                df[col] = self._safe_fillna(df[col], close_series.mean())
             
-            # Berechne %B mit sicherer Division
-            df['bb_pct_b'] = df.apply(
-                lambda row: (row['close'] - row['bb_lower']) / (row['bb_upper'] - row['bb_lower']) 
-                if pd.notnull(row['bb_upper']) and pd.notnull(row['bb_lower']) and row['bb_upper'] != row['bb_lower'] 
-                else 0.5, 
-                axis=1
-            )
+            # Calculate additional BB indicators
+            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
+            df['bb_width'] = self._safe_fillna(df['bb_width'], 0)
             
-            # Füge Bollinger Band Signale hinzu
-            df['bb_upper_cross'] = (df['close'] > df['bb_upper']) & (df['close'].shift(1) <= df['bb_upper'].shift(1))
-            df['bb_lower_cross'] = (df['close'] < df['bb_lower']) & (df['close'].shift(1) >= df['bb_lower'].shift(1))
+            df['bb_pct_b'] = (close_series - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+            df['bb_pct_b'] = self._safe_fillna(df['bb_pct_b'], 0.5)
             
-            # Fülle verbleibende NaN-Werte
-            bb_columns = ['bb_upper', 'bb_middle', 'bb_lower', 'bb_width', 'bb_pct_b']
-            df[bb_columns] = df[bb_columns].fillna(method='ffill').fillna(method='bfill').fillna(0)
+            # Calculate crosses using safe shift values
+            upper_shift = self._safe_fillna(df['bb_upper'].shift(1), df['bb_upper'])
+            lower_shift = self._safe_fillna(df['bb_lower'].shift(1), df['bb_lower'])
+            close_shift = self._safe_fillna(close_series.shift(1), close_series)
             
-            logger.debug("Bollinger Bands hinzugefügt")
+            df['bb_upper_cross'] = (close_series > df['bb_upper']) & (close_shift <= upper_shift)
+            df['bb_lower_cross'] = (close_series < df['bb_lower']) & (close_shift >= lower_shift)
+            
             return df
-            
         except Exception as e:
             logger.error(f"Fehler beim Berechnen der Bollinger Bands: {e}")
-            # Stelle sicher, dass alle BB-Spalten existieren
-            for col in ['bb_upper', 'bb_middle', 'bb_lower', 'bb_width', 'bb_pct_b', 'bb_upper_cross', 'bb_lower_cross']:
-                if col not in df.columns:
-                    df[col] = 0
             return df
     
     def add_atr(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -390,74 +329,41 @@ class TechnicalIndicators:
             DataFrame mit hinzugefügtem ATR
         """
         try:
-            # Validiere Eingabedaten
             if df.empty:
-                logger.warning("DataFrame ist leer, überspringe ATR-Berechnung")
                 return df
             
             required_columns = ['high', 'low', 'close']
-            for col in required_columns:
-                if col not in df.columns:
-                    logger.error(f"'{col}' Spalte nicht im DataFrame gefunden")
-                    return df
-            
-            # Stelle sicher, dass keine None-Werte in den Eingabedaten sind
-            for col in required_columns:
-                if df[col].isnull().any():
-                    logger.warning(f"Null-Werte in {col}-Daten gefunden, führe Bereinigung durch")
-                    df[col] = df[col].ffill().bfill()
-            
-            # Konfigurationswerte mit Fehlerbehandlung
-            atr_config = self.config.get('ATR', {'period': 14})
-            period = atr_config.get('period', 14)
-            
-            # Prüfe, ob genügend Datenpunkte vorhanden sind
-            if len(df) < period:
-                logger.warning(f"Zu wenig Datenpunkte für ATR: {len(df)} < {period}")
+            if not all(col in df.columns for col in required_columns):
                 return df
             
-            # Berechne True Range manuell
-            high = df['high']
-            low = df['low']
-            close = df['close']
-            prev_close = close.shift(1)
+            # Fill NaN values in required columns
+            for col in required_columns:
+                df[col] = self._safe_fillna(df[col])
             
-            # Berechne die drei Komponenten des True Range
-            tr1 = high - low
-            tr2 = (high - prev_close).abs()
-            tr3 = (low - prev_close).abs()
+            atr_config = self.config.get('ATR', {'period': 14})
             
-            # True Range ist das Maximum der drei Komponenten
+            # Calculate True Range
+            tr1 = df['high'] - df['low']
+            tr2 = (df['high'] - df['close'].shift(1)).abs()
+            tr3 = (df['low'] - df['close'].shift(1)).abs()
             tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
             
-            # Berechne ATR als gleitenden Durchschnitt des True Range
-            df['atr'] = tr.rolling(window=period).mean()
+            # Calculate ATR
+            df['atr'] = tr.rolling(window=atr_config['period']).mean()
+            df['atr'] = self._safe_fillna(df['atr'])
             
-            # Berechne ATR in Prozent des Preises mit Null-Wert-Prüfung
-            df['atr_pct'] = df.apply(
-                lambda row: (row['atr'] / row['close'] * 100) 
-                if pd.notnull(row['atr']) and pd.notnull(row['close']) and row['close'] != 0 
-                else 0, 
-                axis=1
-            )
+            # Additional ATR indicators
+            df['atr_pct'] = (df['atr'] / df['close'] * 100)
+            df['atr_pct'] = self._safe_fillna(df['atr_pct'])
             
-            # Füge ATR-basierte Signale hinzu
             df['atr_increasing'] = df['atr'].diff() > 0
-            df['atr_high'] = df['atr_pct'] > df['atr_pct'].rolling(window=period).mean()
             
-            # Fülle verbleibende NaN-Werte
-            atr_columns = ['atr', 'atr_pct', 'atr_increasing', 'atr_high']
-            df[atr_columns] = df[atr_columns].fillna(method='ffill').fillna(method='bfill').fillna(0)
+            atr_pct_ma = df['atr_pct'].rolling(window=atr_config['period']).mean()
+            df['atr_high'] = df['atr_pct'] > self._safe_fillna(atr_pct_ma)
             
-            logger.debug("ATR hinzugefügt")
             return df
-            
         except Exception as e:
             logger.error(f"Fehler beim Berechnen des ATR: {e}")
-            # Stelle sicher, dass alle ATR-Spalten existieren
-            for col in ['atr', 'atr_pct', 'atr_increasing', 'atr_high']:
-                if col not in df.columns:
-                    df[col] = 0
             return df
     
     def add_stochastic(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -471,91 +377,51 @@ class TechnicalIndicators:
             DataFrame mit hinzugefügtem Stochastic Oscillator
         """
         try:
-            # Validiere Eingabedaten
             if df.empty:
-                logger.warning("DataFrame ist leer, überspringe Stochastic-Berechnung")
                 return df
             
             required_columns = ['high', 'low', 'close']
-            for col in required_columns:
-                if col not in df.columns:
-                    logger.error(f"'{col}' Spalte nicht im DataFrame gefunden")
-                    return df
-            
-            # Stelle sicher, dass keine None-Werte in den Eingabedaten sind
-            for col in required_columns:
-                if df[col].isnull().any():
-                    logger.warning(f"Null-Werte in {col}-Daten gefunden, führe Bereinigung durch")
-                    df[col] = df[col].ffill().bfill()
-            
-            # Konfigurationswerte mit Fehlerbehandlung
-            stoch_config = self.config.get('STOCH', {'k_period': 14, 'd_period': 3, 'slowing': 3})
-            k_period = stoch_config.get('k_period', 14)
-            d_period = stoch_config.get('d_period', 3)
-            slowing = stoch_config.get('slowing', 3)
-            overbought = stoch_config.get('overbought', 80)
-            oversold = stoch_config.get('oversold', 20)
-            
-            # Prüfe, ob genügend Datenpunkte vorhanden sind
-            if len(df) < k_period:
-                logger.warning(f"Zu wenig Datenpunkte für Stochastic: {len(df)} < {k_period}")
+            if not all(col in df.columns for col in required_columns):
                 return df
             
-            # Berechne Stochastic Oscillator manuell
-            # Berechne %K
-            low_min = df['low'].rolling(window=k_period).min()
-            high_max = df['high'].rolling(window=k_period).max()
+            # Fill NaN values in required columns
+            for col in required_columns:
+                df[col] = self._safe_fillna(df[col])
             
-            # Sichere Division mit Null-Wert-Prüfung
-            k_raw = df.apply(
-                lambda row: 100 * (row['close'] - low_min[row.name]) / (high_max[row.name] - low_min[row.name]) 
-                if pd.notnull(high_max[row.name]) and pd.notnull(low_min[row.name]) and (high_max[row.name] - low_min[row.name]) != 0 
-                else 50, 
-                axis=1
-            )
+            stoch_config = self.config.get('STOCH', {
+                'k_period': 14,
+                'd_period': 3,
+                'slowing': 3,
+                'overbought': 80,
+                'oversold': 20
+            })
             
-            # Berechne %K mit Glättung
-            k = k_raw.rolling(window=slowing).mean() if slowing > 1 else k_raw
+            # Calculate %K
+            low_min = df['low'].rolling(window=stoch_config['k_period']).min()
+            high_max = df['high'].rolling(window=stoch_config['k_period']).max()
             
-            # Berechne %D (Signal-Linie)
-            d = k.rolling(window=d_period).mean()
+            k_raw = 100 * (df['close'] - low_min) / (high_max - low_min)
+            k = k_raw.rolling(window=stoch_config['slowing']).mean() if stoch_config['slowing'] > 1 else k_raw
             
-            # Füge zum DataFrame hinzu
-            df['stoch_k'] = k
-            df['stoch_d'] = d
+            # Calculate %D
+            d = k.rolling(window=stoch_config['d_period']).mean()
             
-            # Füge Stochastic-Signale hinzu mit Null-Wert-Prüfung
-            df['stoch_overbought'] = df['stoch_k'] > overbought
-            df['stoch_oversold'] = df['stoch_k'] < oversold
+            # Add to DataFrame with safe filling
+            df['stoch_k'] = self._safe_fillna(k, 50)
+            df['stoch_d'] = self._safe_fillna(d, 50)
             
-            # Berechne Kreuzungen mit sicherer Null-Wert-Behandlung
-            k_shift = df['stoch_k'].shift(1).fillna(50)
-            d_shift = df['stoch_d'].shift(1).fillna(50)
+            # Add signals using safe shift values
+            k_shift = self._safe_fillna(df['stoch_k'].shift(1), 50)
+            d_shift = self._safe_fillna(df['stoch_d'].shift(1), 50)
             
+            df['stoch_overbought'] = df['stoch_k'] > stoch_config['overbought']
+            df['stoch_oversold'] = df['stoch_k'] < stoch_config['oversold']
             df['stoch_cross_up'] = (df['stoch_k'] > df['stoch_d']) & (k_shift <= d_shift)
             df['stoch_cross_down'] = (df['stoch_k'] < df['stoch_d']) & (k_shift >= d_shift)
             
-            # Fülle verbleibende NaN-Werte
-            stoch_columns = ['stoch_k', 'stoch_d', 'stoch_overbought', 'stoch_oversold', 'stoch_cross_up', 'stoch_cross_down']
-            for col in stoch_columns:
-                if col in df.columns:
-                    if col in ['stoch_k', 'stoch_d']:
-                        df[col] = df[col].fillna(method='ffill').fillna(method='bfill').fillna(50)
-                    elif col in ['stoch_overbought', 'stoch_oversold', 'stoch_cross_up', 'stoch_cross_down']:
-                        df[col] = df[col].fillna(False)
-            
-            logger.debug("Stochastic Oscillator hinzugefügt")
             return df
-            
         except Exception as e:
             logger.error(f"Fehler beim Berechnen des Stochastic Oscillator: {e}")
-            # Stelle sicher, dass alle Stochastic-Spalten existieren
-            for col in ['stoch_k', 'stoch_d', 'stoch_overbought', 'stoch_oversold', 'stoch_cross_up', 'stoch_cross_down']:
-                if col not in df.columns:
-                    if col in ['stoch_k', 'stoch_d']:
-                        df[col] = 50
-                    else:
-                        df[col] = False
             return df
     
     def add_volume_indicators(self, df: pd.DataFrame) -> pd.DataFrame:

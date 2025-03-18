@@ -1,0 +1,86 @@
+{
+    "name": "Aggressive Trading Pattern",
+    "description": "Pattern mit aggressiveren Einstiegs- und Ausstiegssignalen für höhere Handelsfrequenz",
+    "buy_conditions": [
+        {
+            "name": "RSI Recovering",
+            "conditions": [
+                {"indicator": "rsi", "operator": "<", "value": 40},
+                {"indicator": "rsi", "operator": ">", "value_indicator": "rsi_prev"}
+            ],
+            "weight": 2.5
+        },
+        {
+            "name": "MACD Turning Up",
+            "conditions": [
+                {"indicator": "macd_hist", "operator": ">", "value_indicator": "macd_hist_prev"},
+                {"indicator": "macd_hist_prev", "operator": ">", "value_indicator": "macd_hist_prev2"}
+            ],
+            "weight": 2.0
+        },
+        {
+            "name": "Volume Spike",
+            "conditions": [
+                {"indicator": "volume", "operator": ">", "value_indicator": "volume_ma5"}
+            ],
+            "weight": 1.5
+        },
+        {
+            "name": "Price Moving Up",
+            "conditions": [
+                {"indicator": "close", "operator": ">", "value_indicator": "close_prev"},
+                {"indicator": "close_prev", "operator": ">", "value_indicator": "close_prev2"}
+            ],
+            "weight": 1.0
+        },
+        {
+            "name": "Bollinger Squeeze",
+            "conditions": [
+                {"indicator": "bb_width", "operator": "<", "value_indicator": "bb_width_ma20"}
+            ],
+            "weight": 2.0
+        }
+    ],
+    "sell_conditions": [
+        {
+            "name": "RSI Falling From High",
+            "conditions": [
+                {"indicator": "rsi", "operator": ">", "value": 60},
+                {"indicator": "rsi", "operator": "<", "value_indicator": "rsi_prev"}
+            ],
+            "weight": 2.5
+        },
+        {
+            "name": "MACD Turning Down",
+            "conditions": [
+                {"indicator": "macd_hist", "operator": "<", "value_indicator": "macd_hist_prev"},
+                {"indicator": "macd_hist_prev", "operator": "<", "value_indicator": "macd_hist_prev2"}
+            ],
+            "weight": 2.0
+        },
+        {
+            "name": "Volume Spike on Drop",
+            "conditions": [
+                {"indicator": "volume", "operator": ">", "value_indicator": "volume_ma5"},
+                {"indicator": "close", "operator": "<", "value_indicator": "close_prev"}
+            ],
+            "weight": 1.5
+        },
+        {
+            "name": "Price Moving Down",
+            "conditions": [
+                {"indicator": "close", "operator": "<", "value_indicator": "close_prev"},
+                {"indicator": "close_prev", "operator": "<", "value_indicator": "close_prev2"}
+            ],
+            "weight": 1.0
+        },
+        {
+            "name": "Profit Target",
+            "conditions": [
+                {"indicator": "unrealized_profit", "operator": ">", "value": 1.5}
+            ],
+            "weight": 3.0
+        }
+    ],
+    "signal_threshold": 3.0
+} 

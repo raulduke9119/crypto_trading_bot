@@ -4,6 +4,7 @@ Verantwortlich für die Ausführung von Handelsaufträgen auf Binance.
 """
 import os
 import time
+import numpy as np
 from typing import Dict, List, Optional, Union, Tuple, Any
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
@@ -431,27 +432,173 @@ class OrderExecutor:
     
     def get_order_history(self, symbol: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        Gibt die Order-Historie für ein Symbol zurück.
+        Ruft die Order-Historie für ein Symbol ab.
         
         Args:
-            symbol: Trading-Paar
-            limit: Maximale Anzahl zurückzugebender Orders
+            symbol: Trading-Paar (z.B. 'BTCUSDT')
+            limit: Maximale Anzahl von Ergebnissen
             
         Returns:
-            Liste von Orders
+            Liste mit Order-Historien-Einträgen
         """
         try:
-            orders = self.client.get_all_orders(
-                symbol=symbol,
-                limit=limit
-            )
-            
-            logger.debug(f"{len(orders)} historische Orders für {symbol} gefunden")
+            orders = self.client.get_all_orders(symbol=symbol, limit=limit)
             return orders
-            
         except BinanceAPIException as e:
-            logger.error(f"Fehler beim Abrufen der Order-Historie: {e}")
+            logger.error(f"Fehler beim Abrufen der Order-Historie für {symbol}: {e}")
             return []
         except Exception as e:
             logger.error(f"Unerwarteter Fehler beim Abrufen der Order-Historie: {e}")
             return []
+    
+    def execute_buy_order(self, symbol: str, strength: float = 1.0) -> Optional[Dict[str, Any]]:
+        """
+        Führt eine Kauforder basierend auf einem Trading-Signal aus.
+        
+        Args:
+            symbol: Trading-Paar (z.B. 'BTCUSDT')
+            strength: Signalstärke (1.0-5.0), beeinflusst die Ordergröße
+            
+        Returns:
+            Order-Informationen oder None bei Fehler
+        """
+        try:
+            # Überprüfe, ob das Symbol ein USDT-Paar ist
+            base_asset = symbol.replace('USDT', '')
+            
+            # Hole aktuellen Kontostand und aktuellen Preis
+            usdt_balance = self.get_account_balance('USDT')
+            current_price = float(self.client.get_symbol_ticker(symbol=symbol)['price'])
+            
+            # Berechne die Ordergröße basierend auf Kontostand, Signalstärke und Preis
+            # Stärkere Signale führen zu größeren Orders (bis zu 5% des Kontostands)
+            order_size_percentage = min(1.0, strength) / 100  # Bei Stärke 1.0 = 1%, bei Stärke 5.0 = 5%
+            order_value = usdt_balance * order_size_percentage
+            
+            # Hole Symbol-Filter
+            filters = self.get_symbol_filters(symbol)
+            min_notional = filters['MIN_NOTIONAL']['min_notional']
+            min_qty = filters['LOT_SIZE']['min_qty']
+            step_size = filters['LOT_SIZE']['step_size']
+            
+            # Stelle sicher, dass die Order über dem Mindestvolumen liegt
+            if order_value < min_notional:
+                if min_notional > usdt_balance * 0.1:  # Wenn Mindestvolumen > 10% des Kontostands
+                    logger.warning(f"Nicht genügend USDT für Mindestordervolumen: {min_notional} USDT erforderlich")
+                    return None
+                order_value = min_notional  # Setze auf Mindestvolumen
+            
+            # Berechne die Menge basierend auf USDT-Wert und aktuellem Preis
+            quantity = order_value / current_price
+            
+            # Stelle sicher, dass die Menge über der Mindestmenge liegt
+            if quantity < min_qty:
+                logger.warning(f"Berechnete Menge {quantity} ist unter Mindestmenge {min_qty}")
+                quantity = min_qty
+            
+            # Runde auf gültige Schrittgröße
+            quantity = self.round_step_size(quantity, step_size)
+            
+            logger.info(f"Führe BUY für {symbol} aus: {quantity} (Wert: {quantity * current_price:.2f} USDT)")
+            
+            # Platziere die Market-Order
+            order = self.place_market_order(symbol=symbol, side='BUY', quantity=quantity)
+            
+            if order:
+                logger.info(f"BUY-Order erfolgreich ausgeführt: {order['orderId']}")
+                
+                # Berechne Stop-Loss-Preis (2-5% unter Kaufpreis, abhängig von Volatilität)
+                stop_loss_percentage = 0.03  # 3% Stop-Loss
+                stop_price = current_price * (1 - stop_loss_percentage)
+                
+                # Platziere Stop-Loss-Order
+                stop_order = self.place_stop_loss_order(
+                    symbol=symbol,
+                    quantity=quantity,
+                    stop_price=stop_price
+                )
+                
+                if stop_order:
+                    logger.info(f"Stop-Loss für {symbol} bei {stop_price} gesetzt")
+                
+                return order
+            else:
+                logger.error(f"Konnte BUY-Order für {symbol} nicht platzieren")
+                return None
+                
+        except BinanceAPIException as e:
+            logger.error(f"Binance API-Fehler beim Ausführen der BUY-Order: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unerwarteter Fehler beim Ausführen der BUY-Order: {e}")
+            return None
+    
+    def execute_sell_order(self, symbol: str, strength: float = 1.0) -> Optional[Dict[str, Any]]:
+        """
+        Führt eine Verkaufsorder basierend auf einem Trading-Signal aus.
+        
+        Args:
+            symbol: Trading-Paar (z.B. 'BTCUSDT')
+            strength: Signalstärke (1.0-5.0), beeinflusst die Ordergröße
+            
+        Returns:
+            Order-Informationen oder None bei Fehler
+        """
+        try:
+            # Extrahiere das Basis-Asset aus dem Symbol
+            base_asset = symbol.replace('USDT', '')
+            
+            # Hole aktuellen Asset-Kontostand
+            asset_balance = self.get_account_balance(base_asset)
+            
+            if asset_balance <= 0:
+                logger.warning(f"Kein {base_asset}-Guthaben zum Verkaufen vorhanden")
+                return None
+            
+            # Bestimme die Verkaufsmenge basierend auf der Signalstärke
+            # Stärkere Signale führen zu größeren Verkäufen
+            sell_percentage = min(strength / 5.0, 1.0)  # Bei Stärke 5.0 = 100%, bei Stärke 1.0 = 20%
+            quantity = asset_balance * sell_percentage
+            
+            # Hole Symbol-Filter
+            filters = self.get_symbol_filters(symbol)
+            min_qty = filters['LOT_SIZE']['min_qty']
+            step_size = filters['LOT_SIZE']['step_size']
+            
+            # Stelle sicher, dass die Menge über der Mindestmenge liegt
+            if quantity < min_qty:
+                if min_qty > asset_balance:
+                    logger.warning(f"Asset-Guthaben {asset_balance} ist unter Mindestmenge {min_qty}")
+                    return None
+                quantity = min_qty
+            
+            # Runde auf gültige Schrittgröße
+            quantity = self.round_step_size(quantity, step_size)
+            
+            # Stelle sicher, dass wir nicht mehr verkaufen als wir haben
+            quantity = min(quantity, asset_balance)
+            
+            if quantity <= 0:
+                logger.warning(f"Berechnete Verkaufsmenge ist null oder negativ")
+                return None
+            
+            # Hole aktuellen Preis für Log-Zwecke
+            current_price = float(self.client.get_symbol_ticker(symbol=symbol)['price'])
+            logger.info(f"Führe SELL für {symbol} aus: {quantity} (Wert: {quantity * current_price:.2f} USDT)")
+            
+            # Platziere die Market-Order
+            order = self.place_market_order(symbol=symbol, side='SELL', quantity=quantity)
+            
+            if order:
+                logger.info(f"SELL-Order erfolgreich ausgeführt: {order['orderId']}")
+                return order
+            else:
+                logger.error(f"Konnte SELL-Order für {symbol} nicht platzieren")
+                return None
+                
+        except BinanceAPIException as e:
+            logger.error(f"Binance API-Fehler beim Ausführen der SELL-Order: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unerwarteter Fehler beim Ausführen der SELL-Order: {e}")
+            return None
