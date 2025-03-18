@@ -892,162 +892,242 @@ class TradingBot:
 
     def _process_historical_data(self, symbol: str, data_with_signals: pd.DataFrame) -> None:
         """
-        Verarbeitet historische Daten für ein Symbol im Backtest-Modus.
+        Processes historical data as part of the backtest.
         
         Args:
-            symbol: Das zu verarbeitende Symbol
-            data_with_signals: Die historischen Daten mit Signalen
+            symbol: Trading symbol
+            data_with_signals: Historical data with trading signals
         """
+        if data_with_signals.empty:
+            logger.error(f"No historical data available for {symbol}")
+            return
+            
+        # Make a copy to avoid modifying the original
+        data = data_with_signals.copy()
+        
         try:
-            if data_with_signals.empty:
-                logger.warning(f"Keine historischen Daten für {symbol} vorhanden")
-                return
+            # Reset index to avoid duplicate index issues
+            data = data.reset_index()
+            
+            # Ensure index is datetime and sort by it
+            if 'datetime' in data.columns:
+                data['datetime'] = pd.to_datetime(data['datetime'])
+                data = data.set_index('datetime', drop=False)
+            elif 'date' in data.columns:
+                data['date'] = pd.to_datetime(data['date'])
+                data = data.set_index('date', drop=False)
+            
+            # Ensure index is unique
+            if not data.index.is_unique:
+                logger.warning(f"Duplicate index values found in data for {symbol}, keeping first occurrence")
+                data = data[~data.index.duplicated(keep='first')]
                 
-            # Initialisiere Tracking-Variablen für dieses Symbol
-            self.backtest_data[symbol] = {
-                'equity_curve': [self.initial_balance],
-                'trades': [],
-                'current_position': None,
-                'results': {}
+            # Sort by index to ensure chronological order
+            data = data.sort_index()
+            
+            # Keep track of positions, pending orders, etc. for this symbol in the backtest
+            self.positions[symbol] = None
+            self.pending_orders[symbol] = []
+            self.trade_history[symbol] = []
+            self.equity_curve = [(str(data.index[0]), self.initial_balance)]
+            self.last_balance = self.initial_balance
+            
+            # Set up backtest metrics tracking
+            self.backtest_metrics[symbol] = {
+                'trades': 0,
+                'wins': 0,
+                'losses': 0,
+                'win_rate': 0.0,
+                'avg_win': 0.0,
+                'avg_loss': 0.0,
+                'max_drawdown': 0.0,
+                'profit_factor': 0.0,
+                'total_profit': 0.0,
+                'total_loss': 0.0
             }
             
-            # Durchlaufe alle Datenpunkte
-            for i in range(len(data_with_signals)):
-                try:
-                    # Aktueller Datenpunkt
-                    date = data_with_signals.index[i]
-                    current_data = data_with_signals.iloc[i:i+1]
-                    current_price = current_data['close'].iloc[0]
-                    
-                    # Aktuelle Position
-                    position = None
-                    position_dict = self.backtest_data[symbol]['current_position']
-                    
-                    # Wenn eine Position existiert, konvertiere sie in ein Position-Objekt
-                    if position_dict is not None:
-                        position = Position(
-                            symbol=symbol,
-                            entry_price=position_dict['entry_price'],
-                            quantity=position_dict['quantity'],
-                            entry_time=position_dict['entry_date']
-                        )
-                        position.current_price = current_price
-                        position.highest_price = position_dict.get('highest_price', position.entry_price)
-                        position.unrealized_pnl_pct = (current_price - position.entry_price) / position.entry_price * 100
-                    
-                    # Wenn eine Position existiert, prüfe auf Verkaufssignal
-                    if position is not None:
-                        # Prüfe, ob die Position geschlossen werden sollte
-                        status, reason = self.strategy.evaluate_position(
-                            position=position, 
-                            current_data=pd.DataFrame([current_data])  # Ensure we pass a DataFrame
-                        )
-                        
-                        if status == PositionStatus.SELL:
-                            # Verkauf ausführen
-                            pnl = position.quantity * (current_price - position.entry_price)
-                            pnl_pct = (current_price - position.entry_price) / position.entry_price * 100
-                            
-                            # Aktualisiere Bilanz
-                            new_balance = self.backtest_data[symbol]['equity_curve'][-1] + pnl
-                            self.backtest_data[symbol]['equity_curve'].append(new_balance)
-                            
-                            # Dokumentiere Trade
-                            trade = {
-                                'symbol': symbol,
-                                'entry_date': position.entry_time,
-                                'exit_date': date,
-                                'entry_price': position.entry_price,
-                                'exit_price': current_price,
-                                'quantity': position.quantity,
-                                'pnl': pnl,
-                                'pnl_pct': pnl_pct,
-                                'days_held': (date - position.entry_time).days if isinstance(position.entry_time, pd.Timestamp) else 0,
-                                'exit_reason': reason
-                            }
-                            self.backtest_data[symbol]['trades'].append(trade)
-                            
-                            # Logge Trade
-                            logger.info(f"Backtest: Verkauf {symbol} am {date}, "
-                                      f"Preis: {current_price:.2f}, PnL: {pnl_pct:.2f}%, "
-                                      f"Grund: {reason}")
-                            
-                            # Position zurücksetzen
-                            self.backtest_data[symbol]['current_position'] = None
-                        else:
-                            # Position halten, Equity aktualisieren
-                            position.update(current_price)  # Update Position object with current price
-                            unrealized_pnl = position.unrealized_pnl
-                            new_balance = self.backtest_data[symbol]['equity_curve'][0] + unrealized_pnl
-                            self.backtest_data[symbol]['equity_curve'].append(new_balance)
-                            
-                            # Aktualisiere die Position für die nächste Iteration
-                            # Convert Position object back to dictionary for storage
-                            self.backtest_data[symbol]['current_position'] = {
-                                'symbol': position.symbol,
-                                'entry_date': position.entry_time,
-                                'entry_price': position.entry_price,
-                                'quantity': position.quantity,
-                                'current_price': position.current_price,
-                                'highest_price': position.highest_price,
-                                'unrealized_pnl': position.unrealized_pnl,
-                                'unrealized_pnl_pct': position.unrealized_pnl_pct,
-                                'days_held': (date - position.entry_time).days if isinstance(position.entry_time, pd.Timestamp) else 0
-                            }
-                    else:
-                        # Keine Position, prüfe auf Kaufsignal
-                        should_buy, signal_strength = self.strategy.should_buy(current_data, None)
-                        
-                        if should_buy and signal_strength > 0:
-                            # Berechne Positionsgröße
-                            risk_amount = self.initial_balance * (self.risk_percentage / 100)
-                            position_size = risk_amount / current_price
-                            
-                            # Erstelle ein Position-Objekt
-                            new_position = Position(
-                                symbol=symbol,
-                                entry_price=current_price,
-                                quantity=position_size,
-                                entry_time=date
-                            )
-                            
-                            # Speichere als Dictionary für zukünftige Iterationen
-                            self.backtest_data[symbol]['current_position'] = {
-                                'symbol': new_position.symbol,
-                                'entry_date': new_position.entry_time,
-                                'entry_price': new_position.entry_price,
-                                'quantity': new_position.quantity,
-                                'current_price': new_position.current_price,
-                                'highest_price': new_position.highest_price,
-                                'unrealized_pnl': 0.0,
-                                'unrealized_pnl_pct': 0.0,
-                                'days_held': 0,
-                                'signal_strength': signal_strength
-                            }
-                            
-                            # Logge Trade
-                            logger.info(f"Kauf: {symbol} zu {current_price:.2f} USDT, "
-                                      f"Größe: {position_size:.8f}, "
-                                      f"Signal-Stärke: {signal_strength:.1f}")
-                            
-                            # Equity bleibt gleich beim Kauf
-                            self.backtest_data[symbol]['equity_curve'].append(
-                                self.backtest_data[symbol]['equity_curve'][-1]
-                            )
-                        else:
-                            # Keine Aktion, Equity bleibt gleich
-                            self.backtest_data[symbol]['equity_curve'].append(
-                                self.backtest_data[symbol]['equity_curve'][-1]
-                            )
-                except Exception as e:
-                    logger.error(f"Fehler bei der Verarbeitung von {symbol} am {date}: {e}")
+            # Group data by date to simulate daily trading
+            date_groups = data.groupby(data.index.date)
             
-            # Berechne Backtest-Metriken für dieses Symbol
+            # Process data day by day for more realistic backtesting
+            for date, day_data in date_groups:
+                try:
+                    day_date_str = str(date)
+                    
+                    # Process each candle in the day
+                    for idx, candle in day_data.iterrows():
+                        current_datetime = idx if isinstance(idx, pd.Timestamp) else pd.Timestamp(idx)
+                        
+                        # Process buy signals (only if not already in a position)
+                        if candle['buy_signal'] > 0 and (self.positions[symbol] is None or len(self.positions[symbol]) < self.max_positions):
+                            # Check if we should buy
+                            should_buy, signal_strength = self.strategy.should_buy(day_data.loc[:idx], self.positions[symbol])
+                            
+                            if should_buy:
+                                # Calculate position size
+                                size = self._calculate_position_size(symbol, candle, signal_strength)
+                                
+                                if size > 0:
+                                    # Create a new position
+                                    price = candle['close']
+                                    position_value = size * price
+                                    
+                                    # Check if we have enough balance
+                                    if position_value <= self.last_balance:
+                                        # Create position
+                                        position = {
+                                            'symbol': symbol,
+                                            'entry_price': price,
+                                            'quantity': size,
+                                            'entry_time': current_datetime,
+                                            'unrealized_pnl': 0.0,
+                                            'unrealized_pnl_pct': 0.0,
+                                            'highest_price': price,
+                                            'lowest_price': price,
+                                            'current_price': price,
+                                            'stop_loss': price * (1 - self.strategy.stop_loss_pct / 100),
+                                            'take_profit': price * (1 + self.strategy.take_profit_pct / 100),
+                                            'trailing_stop': price * (1 - self.strategy.trailing_stop_pct / 100),
+                                            'status': 'open',
+                                            'exit_reason': None,
+                                            'signal_strength': signal_strength
+                                        }
+                                        
+                                        # Update the trailing stop based on ATR if available
+                                        if 'atr' in candle and candle['atr'] > 0:
+                                            atr_stop_distance = candle['atr'] * 1.5
+                                            atr_based_stop = price - atr_stop_distance
+                                            position['stop_loss'] = max(position['stop_loss'], atr_based_stop)
+                                            position['trailing_stop'] = position['stop_loss']
+                                        
+                                        # Add position to list
+                                        if self.positions[symbol] is None:
+                                            self.positions[symbol] = [position]
+                                        else:
+                                            self.positions[symbol].append(position)
+                                            
+                                        # Update balance
+                                        self.last_balance -= position_value
+                                        
+                                        # Log the trade
+                                        logger.info(f"Kauf: {symbol} zu {price:.2f} USDT, Größe: {size:.8f}, Signal-Stärke: {signal_strength:.1f}")
+                                    else:
+                                        logger.warning(f"Nicht genügend Guthaben für Kauf von {symbol}: {self.last_balance:.2f} USDT < {position_value:.2f} USDT")
+                        
+                        # Update existing positions
+                        if self.positions[symbol]:
+                            updated_positions = []
+                            for position in self.positions[symbol]:
+                                # Update current price and P&L
+                                position['current_price'] = candle['close']
+                                
+                                # Track highest and lowest prices
+                                if position['current_price'] > position['highest_price']:
+                                    position['highest_price'] = position['current_price']
+                                    
+                                    # Update trailing stop if price moves up (for long positions)
+                                    new_trailing_stop = position['current_price'] * (1 - self.strategy.trailing_stop_pct / 100)
+                                    if new_trailing_stop > position['trailing_stop']:
+                                        position['trailing_stop'] = new_trailing_stop
+                                
+                                if position['current_price'] < position['lowest_price']:
+                                    position['lowest_price'] = position['current_price']
+                                
+                                # Calculate unrealized P&L
+                                price_diff = position['current_price'] - position['entry_price']
+                                position['unrealized_pnl'] = price_diff * position['quantity']
+                                position['unrealized_pnl_pct'] = (price_diff / position['entry_price']) * 100
+                                
+                                # Add unrealized_pnl_pct to candle data for sell signal generation
+                                candle_with_pnl = candle.copy()
+                                candle_with_pnl['unrealized_pnl_pct'] = position['unrealized_pnl_pct']
+                                
+                                # Check if we should sell based on:
+                                # 1. Sell signal
+                                # 2. Stop loss hit
+                                # 3. Take profit hit
+                                # 4. Trailing stop hit
+                                # 5. Max drawdown hit
+                                
+                                sell_reason = None
+                                
+                                # 1. Check sell signal
+                                if candle['sell_signal'] > 0:
+                                    should_sell, signal_strength = self.strategy.should_sell(day_data.loc[:idx].copy(), position)
+                                    if should_sell:
+                                        sell_reason = "sell_signal"
+                                
+                                # 2. Check stop loss
+                                elif position['current_price'] <= position['stop_loss']:
+                                    sell_reason = "stop_loss"
+                                
+                                # 3. Check take profit
+                                elif position['current_price'] >= position['take_profit']:
+                                    sell_reason = "take_profit"
+                                
+                                # 4. Check trailing stop
+                                elif position['current_price'] <= position['trailing_stop']:
+                                    sell_reason = "trailing_stop"
+                                
+                                # 5. Check max drawdown
+                                elif position['unrealized_pnl_pct'] <= -self.strategy.max_drawdown_pct:
+                                    sell_reason = "max_drawdown"
+                                
+                                # If we have a reason to sell, close the position
+                                if sell_reason:
+                                    # Close position
+                                    close_price = position['current_price']
+                                    position_value = position['quantity'] * close_price
+                                    
+                                    # Update balance
+                                    self.last_balance += position_value
+                                    
+                                    # Calculate final P&L
+                                    pnl = position['unrealized_pnl']
+                                    pnl_pct = position['unrealized_pnl_pct']
+                                    
+                                    # Mark position as closed
+                                    position['status'] = 'closed'
+                                    position['exit_reason'] = sell_reason
+                                    position['exit_time'] = current_datetime
+                                    position['exit_price'] = close_price
+                                    position['realized_pnl'] = pnl
+                                    position['realized_pnl_pct'] = pnl_pct
+                                    
+                                    # Add to trade history
+                                    self.trade_history[symbol].append(position)
+                                    
+                                    # Update metrics
+                                    self.backtest_metrics[symbol]['trades'] += 1
+                                    if pnl > 0:
+                                        self.backtest_metrics[symbol]['wins'] += 1
+                                        self.backtest_metrics[symbol]['total_profit'] += pnl
+                                    else:
+                                        self.backtest_metrics[symbol]['losses'] += 1
+                                        self.backtest_metrics[symbol]['total_loss'] += abs(pnl)
+                                    
+                                    # Log the trade
+                                    logger.info(f"Verkauf: {symbol} zu {close_price:.2f} USDT, PnL: {pnl:.2f} USDT ({pnl_pct:.2f}%), Grund: {sell_reason}")
+                                else:
+                                    # Keep position open
+                                    updated_positions.append(position)
+                            
+                            # Update positions list (removing closed positions)
+                            self.positions[symbol] = updated_positions if updated_positions else None
+                        
+                        # Record equity at this point
+                        self.equity_curve.append((str(current_datetime), self.last_balance + self._calculate_open_positions_value()))
+                    
+                except Exception as e:
+                    logger.error(f"Fehler bei der Verarbeitung von {symbol} am {day_date_str}: {e}")
+            
+            # Calculate final backtest metrics
             self._calculate_backtest_metrics(symbol)
             
         except Exception as e:
-            logger.error(f"Fehler bei der Verarbeitung historischer Daten für {symbol}: {e}")
-            logger.debug(traceback.format_exc())
+            logger.error(f"Fehler bei der Verarbeitung der historischen Daten für {symbol}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def _calculate_backtest_metrics(self, symbol: str) -> None:
         """
