@@ -29,8 +29,11 @@ from utils.position import Position
 from config.config import (
     API_KEY, API_SECRET, USE_TESTNET, TRADING_SYMBOLS, DEFAULT_TIMEFRAME,
     RISK_PERCENTAGE, MAX_POSITIONS, INITIAL_CAPITAL, HISTORICAL_DATA_DAYS,
-    DATA_DIRECTORY, MODEL_DIRECTORY, LOG_LEVEL, LOG_FILE, USE_ML
+    DATA_DIRECTORY, MODEL_DIRECTORY, LOG_LEVEL, LOG_FILE, USE_ML,
+    DEFAULT_PATTERN, TRAILING_STOP_PCT, MAX_DRAWDOWN
 )
+from utils.order_book_manager import OrderBookManager
+from utils.performance_tracker import PerformanceTracker
 
 # Logger einrichten
 logger = setup_logger(LOG_FILE, LOG_LEVEL)
@@ -42,51 +45,63 @@ class TradingBot:
     """
     
     def __init__(self, 
-                api_key: str = API_KEY, 
-                api_secret: str = API_SECRET,
-                use_testnet: bool = USE_TESTNET,
-                symbols: List[str] = TRADING_SYMBOLS,
-                timeframe: str = DEFAULT_TIMEFRAME,
-                risk_percentage: float = RISK_PERCENTAGE,
-                max_positions: int = MAX_POSITIONS,
-                initial_capital: float = INITIAL_CAPITAL,
-                use_ml: bool = USE_ML,
-                pattern_name: str = "default_pattern.json"):
+                config: Dict[str, Any],
+                is_backtest: bool = False,
+                is_paper_trading: bool = False,
+                initial_balance: float = INITIAL_CAPITAL):
         """
         Initialisiert den Trading Bot.
         
         Args:
-            api_key: Binance API-Schlüssel
-            api_secret: Binance API-Secret
-            use_testnet: Ob Testnet verwendet werden soll
-            symbols: Liste von Trading-Paaren
-            timeframe: Zeitintervall
-            risk_percentage: Risikoprozentsatz pro Trade
-            max_positions: Maximale Anzahl gleichzeitiger Positionen
-            initial_capital: Anfangskapital
-            use_ml: Ob ML-Vorhersagen verwendet werden sollen
-            pattern_name: Name des zu verwendenden Trading-Patterns
+            config: Dictionary mit Konfigurationseinstellungen
+            is_backtest: Ob der Bot im Backtest-Modus läuft
+            is_paper_trading: Ob der Bot im Paper-Trading-Modus läuft
+            initial_balance: Anfangsguthaben für Backtest oder Paper-Trading
         """
-        self.api_key = api_key
-        self.api_secret = api_secret
-        self.use_testnet = use_testnet
-        self.symbols = symbols
-        self.timeframe = timeframe
-        self.risk_percentage = risk_percentage
-        self.max_positions = max_positions
-        self.initial_capital = initial_capital
-        self.use_ml = use_ml
-        self.pattern_name = pattern_name
+        self.api_key = config.get('api_key', API_KEY)
+        self.api_secret = config.get('api_secret', API_SECRET)
+        self.use_testnet = config.get('testnet', USE_TESTNET)
+        self.symbols = config.get('symbols', TRADING_SYMBOLS)
+        self.timeframe = config.get('timeframe', DEFAULT_TIMEFRAME)
+        self.risk_percentage = config.get('risk_percentage', RISK_PERCENTAGE)
+        self.max_positions = config.get('max_positions', MAX_POSITIONS)
+        self.initial_capital = initial_balance
+        self.use_ml = config.get('use_ml_predictions', USE_ML)
+        
+        # Pattern configuration
+        if 'pattern_file' in config and config['pattern_file']:
+            self.pattern_name = config['pattern_file']
+        else:
+            self.pattern_name = DEFAULT_PATTERN
+        
+        # Trading mode
+        self.is_backtest = is_backtest
+        self.is_paper_trading = is_paper_trading
+        
+        # Log configuration
+        self.log_level = config.get('log_level', LOG_LEVEL)
+        self.log_file = config.get('log_file', LOG_FILE)
+        
+        # Risk parameters
+        self.trailing_stop_pct = config.get('trailing_stop_pct', TRAILING_STOP_PCT)
+        self.max_drawdown = config.get('max_drawdown', MAX_DRAWDOWN)
+        
+        # Order book and Kelly parameters
+        self.use_order_book = config.get('use_order_book', False)
+        self.order_book_depth = config.get('order_book_depth', 10)
+        self.kelly_factor = config.get('kelly_factor', 0.5)
+        self.min_trades = config.get('min_trades', 10)
+        self.history_file = config.get('history_file', None)
         
         # Prüfe API-Schlüssel
-        if not api_key or not api_secret:
+        if not self.api_key or not self.api_secret:
             logger.error("API-Schlüssel oder Secret fehlen. Bitte in config.py oder .env-Datei konfigurieren.")
             raise ValueError("API-Schlüssel oder Secret fehlen")
         
         # Initialisiere Binance-Client
         try:
-            self.client = Client(api_key, api_secret, testnet=use_testnet)
-            logger.info(f"Binance-Client initialisiert (Testnet: {use_testnet})")
+            self.client = Client(self.api_key, self.api_secret, testnet=self.use_testnet)
+            logger.info(f"Binance-Client initialisiert (Testnet: {self.use_testnet})")
         except Exception as e:
             logger.error(f"Fehler beim Initialisieren des Binance-Clients: {e}")
             raise
@@ -95,25 +110,27 @@ class TradingBot:
         self.data_collector = DataCollector(self.client)
         self.indicators = TechnicalIndicators()
         self.strategy = MultiIndicatorStrategy(
-            risk_percentage, 
-            max_positions, 
-            use_ml,
-            trailing_stop_pct=1.5,
-            max_drawdown_pct=5.0,
-            pattern_name=pattern_name
+            self.risk_percentage, 
+            self.max_positions, 
+            self.use_ml,
+            trailing_stop_pct=self.trailing_stop_pct,
+            max_drawdown_pct=self.max_drawdown,
+            pattern_name=self.pattern_name
         )
         self.order_executor = OrderExecutor(self.client)
         
         # Initialisiere Prediction Models für jeden Symbol
         self.prediction_models = {}
-        if use_ml:
-            for symbol in symbols:
+        if self.use_ml:
+            for symbol in self.symbols:
                 self.prediction_models[symbol] = PredictionModel(symbol)
-            logger.info(f"Vorhersagemodelle für {len(symbols)} Symbole initialisiert")
+            logger.info(f"Vorhersagemodelle für {len(self.symbols)} Symbole initialisiert")
         
         # Tracking von Positionen und Orders
         self.positions = {}  # Aktive Positionen
         self.open_orders = {}  # Offene Orders
+        self.trade_history = {}  # Trade history for each symbol
+        self.equity_curve = {}  # Equity curve for each symbol
         
         # Backtest-Daten
         self.backtest_data = {}  # Initialisiere backtest_data als leeres Dictionary
@@ -124,7 +141,19 @@ class TradingBot:
         self.failed_trades = 0
         self.total_profit_loss = 0.0
         
-        logger.info(f"Trading Bot initialisiert mit {len(symbols)} Symbolen")
+        # Initialize new components
+        if self.use_order_book:
+            self.order_book_manager = OrderBookManager(self.api_key, self.api_secret, self.use_testnet)
+            logger.info("OrderBookManager initialized for liquidity analysis")
+        else:
+            self.order_book_manager = None
+            
+        self.performance_tracker = PerformanceTracker(
+            initial_capital=self.initial_capital, 
+            history_file=self.history_file
+        )
+        
+        logger.info(f"Trading Bot initialized with {len(self.symbols)} symbols in {'backtest' if is_backtest else 'paper trading' if is_paper_trading else 'live'} mode")
     
     def test_connection(self) -> bool:
         """
@@ -224,376 +253,587 @@ class TradingBot:
             logger.error(f"Fehler beim Training der Vorhersagemodelle: {e}")
             raise
     
-    def backtest(self,
-                start_date: str,
-                end_date: Optional[str] = None,
-                initial_balance: float = INITIAL_CAPITAL) -> Dict[str, Any]:
+    def backtest(self, start_date=None, end_date=None, initial_balance=1000.0):
         """
-        Führt einen Backtest der Handelsstrategie durch.
+        Run a backtest simulation using historical data.
         
         Args:
-            start_date: Startdatum im Format 'YYYY-MM-DD'
-            end_date: Enddatum im Format 'YYYY-MM-DD' (optional)
-            initial_balance: Anfangskapital für den Backtest
+            start_date: Optional start date for backtest (datetime or string)
+            end_date: Optional end date for backtest (datetime or string)
+            initial_balance: Initial account balance for backtest
             
         Returns:
-            Dictionary mit Backtest-Ergebnissen
+            Dictionary with backtest results
         """
-        try:
-            # Validiere Eingabeparameter
-            if not isinstance(start_date, str) or not start_date:
-                raise ValueError("start_date muss ein gültiger String sein")
-            if end_date and not isinstance(end_date, str):
-                raise ValueError("end_date muss ein gültiger String sein")
-            if not isinstance(initial_balance, (int, float)) or initial_balance <= 0:
-                raise ValueError("initial_balance muss eine positive Zahl sein")
+        start_time = time.time()
+        
+        # Validate inputs
+        if start_date and isinstance(start_date, str):
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        
+        if end_date and isinstance(end_date, str):
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        if not end_date:
+            end_date = datetime.now()
             
-            logger.info(f"Starte Backtest von {start_date} bis {end_date or 'heute'} mit {initial_balance} USDT")
-            
-            # Hole historische Daten
-            market_data: Dict[str, pd.DataFrame] = {}
-            for symbol in self.symbols:
-                try:
-                    # Hole historische Daten
-                    df = self.data_collector.get_historical_klines(
-                        symbol=symbol,
-                        interval=self.timeframe,
-                        start_str=start_date,
-                        end_str=end_date
-                    )
-                    
-                    if df.empty:
-                        logger.warning(f"Keine Daten gefunden für {symbol}")
-                        continue
-                    
-                    # Reset index to avoid any issues with duplicates
-                    df = df.reset_index()
-                    
-                    # Ensure we have a datetime column
-                    if 'datetime' in df.columns:
-                        date_col = 'datetime'
-                    elif 'date' in df.columns:
-                        date_col = 'date'
-                    else:
-                        # Create a datetime column from the index if needed
-                        df['datetime'] = pd.to_datetime(df.index)
-                        date_col = 'datetime'
-                    
-                    # Convert to datetime and ensure it's in the correct format
-                    df[date_col] = pd.to_datetime(df[date_col])
-                    
-                    # Sort by date
-                    df = df.sort_values(by=date_col)
-                    
-                    # Check for and remove duplicate timestamps
-                    if df.duplicated(subset=[date_col]).any():
-                        logger.warning(f"Found {df.duplicated(subset=[date_col]).sum()} duplicate timestamps in data for {symbol}")
-                        df = df.drop_duplicates(subset=[date_col], keep='first')
-                    
-                    # Set index to datetime
-                    df = df.set_index(date_col)
-                    
-                    # Füge technische Indikatoren hinzu
-                    df = self.indicators.add_all_indicators(df)
-                    if df.empty:
-                        logger.warning(f"Fehler beim Hinzufügen der Indikatoren für {symbol}")
-                        continue
-                    
-                    # Fülle NaN-Werte
-                    df = df.ffill().bfill()
-                    
-                    # Berechne Signale
-                    df = self.strategy.generate_signals(df)
-                    if df.empty:
-                        logger.warning(f"Fehler beim Generieren der Signale für {symbol}")
-                        continue
-                    
-                    # Speichere DataFrame
-                    market_data[symbol] = df
-                    logger.info(f"Daten für {symbol} erfolgreich geladen: {len(df)} Datenpunkte")
-                    
-                except Exception as e:
-                    logger.error(f"Fehler beim Laden der Daten für {symbol}: {e}")
-                    continue
-            
-            if not market_data:
-                raise ValueError("Keine Marktdaten für Backtest verfügbar")
-            
-            # Trainiere ML-Modelle wenn aktiviert
-            if self.use_ml:
-                self.train_prediction_models(market_data)
-            
-            # Initialisiere Backtest-Variablen
-            balance: float = initial_balance
-            equity_curve: List[Tuple[str, float]] = [(start_date, initial_balance)]
-            trades: List[Dict[str, Any]] = []
-            max_balance: float = initial_balance
-            winning_trades: int = 0
-            losing_trades: int = 0
-            
-            # Tracking variables for positions
-            positions = {}
-            for symbol in self.symbols:
-                positions[symbol] = []
-                
-            # Initialize backtest data structures
-            self.backtest_data = {}
-            for symbol in self.symbols:
-                self.backtest_data[symbol] = {
-                    'trades': [],
-                    'equity_curve': equity_curve.copy(),
-                    'results': {}
-                }
-            
-            # Directly process data without using daterange
+        # Reset simulation state
+        self.initial_capital = initial_balance
+        self.backtest_stats = {}
+        self.trade_history = {}
+        self.equity_curve = {}
+        self.positions = {}
+
+        # Reset performance tracker with initial balance
+        self.performance_tracker.reset()
+        self.performance_tracker.initial_capital = initial_balance
+        self.performance_tracker.current_capital = initial_balance
+        
+        logger.info(f"Starting backtest from {start_date} to {end_date} with ${initial_balance} initial capital")
+        
+        # Get historical data for each symbol
+        all_market_data = {}
+        for symbol in self.symbols:
             try:
-                for symbol, df in market_data.items():
-                    # Process this symbol's data
-                    # First, create a clean dataset for processing
-                    processed_df = df.copy()
-                    
-                    # Track open positions for this symbol
-                    open_positions = []
-                    trade_history = []
-                    
-                    # Iterate through each row in the dataframe sequentially
-                    for idx, row in processed_df.iterrows():
-                        current_datetime = idx
-                        current_date_str = current_datetime.strftime('%Y-%m-%d')
-                        
-                        # Update existing positions with current price
-                        updated_positions = []
-                        for pos in open_positions:
-                            # Update position with current price
-                            pos['current_price'] = row['close']
-                            
-                            # Update highest/lowest prices
-                            if row['close'] > pos.get('highest_price', 0):
-                                pos['highest_price'] = row['close']
-                                # Update trailing stop if price is higher (for long positions)
-                                new_trailing_stop = row['close'] * (1 - self.strategy.trailing_stop_pct / 100)
-                                pos['trailing_stop'] = max(pos.get('trailing_stop', 0), new_trailing_stop)
-                                
-                            if row['close'] < pos.get('lowest_price', float('inf')):
-                                pos['lowest_price'] = row['close']
-                            
-                            # Calculate unrealized P&L
-                            entry_price = pos.get('entry_price', row['close'])
-                            price_diff = row['close'] - entry_price
-                            pos['unrealized_pnl'] = price_diff * pos.get('quantity', 0)
-                            pos['unrealized_pnl_pct'] = (price_diff / entry_price) * 100 if entry_price > 0 else 0
-                            
-                            # Check if position should be closed
-                            sell_reason = None
-                            
-                            # Check stop loss
-                            if row['close'] <= pos.get('stop_loss', 0):
-                                sell_reason = "stop_loss"
-                            # Check take profit
-                            elif row['close'] >= pos.get('take_profit', float('inf')):
-                                sell_reason = "take_profit"
-                            # Check trailing stop
-                            elif row['close'] <= pos.get('trailing_stop', 0):
-                                sell_reason = "trailing_stop"
-                            # Check max drawdown
-                            elif pos.get('unrealized_pnl_pct', 0) <= -self.strategy.max_drawdown_pct:
-                                sell_reason = "max_drawdown"
-                            # Check sell signal
-                            elif row.get('sell_signal', 0) > 0:
-                                # Create a slice of the dataframe up to current row
-                                current_slice = processed_df.loc[:idx].tail(10)  # Use last 10 rows for context
-                                should_sell, _ = self.strategy.should_sell(current_slice, pos)
-                                if should_sell:
-                                    sell_reason = "sell_signal"
-                            
-                            # If we have a reason to sell, close the position
-                            if sell_reason:
-                                # Close the position
-                                close_price = row['close']
-                                position_value = pos.get('quantity', 0) * close_price
-                                
-                                # Calculate final P&L
-                                pnl = pos.get('unrealized_pnl', 0)
-                                pnl_pct = pos.get('unrealized_pnl_pct', 0)
-                                
-                                # Update balance
-                                balance += position_value
-                                
-                                # Update trade stats
-                                if pnl > 0:
-                                    winning_trades += 1
-                                else:
-                                    losing_trades += 1
-                                
-                                # Record the closed trade
-                                pos['status'] = 'closed'
-                                pos['exit_reason'] = sell_reason
-                                pos['exit_time'] = current_datetime
-                                pos['exit_price'] = close_price
-                                pos['realized_pnl'] = pnl
-                                pos['realized_pnl_pct'] = pnl_pct
-                                
-                                trade_history.append(pos)
-                                
-                                logger.info(
-                                    f"Verkauf: {symbol} zu {close_price:.2f} USDT, "
-                                    f"PnL: {pnl:.2f} USDT ({pnl_pct:.2f}%), "
-                                    f"Grund: {sell_reason}"
-                                )
-                            else:
-                                # Keep the position open
-                                updated_positions.append(pos)
-                        
-                        # Update open positions list
-                        open_positions = updated_positions
-                        
-                        # Check for buy signals if we have capacity for more positions
-                        if len(open_positions) < self.max_positions and row.get('buy_signal', 0) > 0:
-                            # Create a slice of the dataframe up to current row for context
-                            current_slice = processed_df.loc[:idx].tail(10)  # Use last 10 rows for context
-                            
-                            # Check if we should buy
-                            should_buy, signal_strength = self.strategy.should_buy(current_slice, open_positions)
-                            
-                            if should_buy:
-                                # Calculate position size
-                                price = row['close']
-                                position_size = self._calculate_position_size_simple(
-                                    balance=balance,
-                                    price=price,
-                                    risk_pct=self.risk_percentage,
-                                    signal_strength=signal_strength
-                                )
-                                
-                                position_value = position_size * price
-                                
-                                # Check if we have enough balance
-                                if position_value <= balance:
-                                    # Create new position
-                                    new_position = {
-                                        'symbol': symbol,
-                                        'entry_price': price,
-                                        'quantity': position_size,
-                                        'entry_time': current_datetime,
-                                        'current_price': price,
-                                        'highest_price': price,
-                                        'lowest_price': price,
-                                        'stop_loss': price * (1 - self.strategy.stop_loss_pct / 100),
-                                        'take_profit': price * (1 + self.strategy.take_profit_pct / 100),
-                                        'trailing_stop': price * (1 - self.strategy.trailing_stop_pct / 100),
-                                        'unrealized_pnl': 0.0,
-                                        'unrealized_pnl_pct': 0.0,
-                                        'status': 'open',
-                                        'signal_strength': signal_strength
-                                    }
-                                    
-                                    # Add position to open positions
-                                    open_positions.append(new_position)
-                                    
-                                    # Update balance
-                                    balance -= position_value
-                                    
-                                    logger.info(
-                                        f"Kauf: {symbol} zu {price:.2f} USDT, "
-                                        f"Größe: {position_size:.8f}, "
-                                        f"Signal-Stärke: {signal_strength:.1f}"
-                                    )
-                        
-                        # Record equity at this point
-                        # Calculate total value of all open positions
-                        open_value = sum(pos.get('quantity', 0) * pos.get('current_price', 0) for pos in open_positions)
-                        total_equity = balance + open_value
-                        
-                        if total_equity > max_balance:
-                            max_balance = total_equity
-                            
-                        equity_curve.append((current_date_str, total_equity))
-                    
-                    # After processing all data for this symbol, save results
-                    self.backtest_data[symbol]['trades'] = trade_history
-                    self.backtest_data[symbol]['equity_curve'] = equity_curve
+                # Get historical data
+                logger.info(f"Fetching historical data for {symbol}...")
+                market_data = self.data_collector.get_historical_data(symbol, self.timeframe, start_date, end_date)
                 
-                # Calculate overall backtest results
-                total_trades = winning_trades + losing_trades
-                win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
-                return_percentage = ((equity_curve[-1][1] - initial_balance) / initial_balance * 100) if equity_curve else 0.0
+                if market_data.empty:
+                    logger.warning(f"No historical data found for {symbol}")
+                    continue
                 
-                # Calculate drawdowns
-                drawdowns = []
-                peak = initial_balance
-                for _, value in equity_curve:
-                    if value > peak:
-                        peak = value
-                    drawdown = ((peak - value) / peak) * 100
-                    drawdowns.append(drawdown)
-                    
-                max_drawdown = max(drawdowns) if drawdowns else 0.0
+                # Reset index to ensure we have a proper datetime column
+                market_data = market_data.reset_index()
+                if 'datetime' not in market_data.columns and 'date' in market_data.columns:
+                    market_data = market_data.rename(columns={'date': 'datetime'})
                 
-                # Calculate Sharpe ratio
-                returns = []
-                for i in range(1, len(equity_curve)):
-                    prev_balance = equity_curve[i-1][1]
-                    curr_balance = equity_curve[i][1]
-                    if prev_balance > 0:
-                        daily_return = (curr_balance - prev_balance) / prev_balance
-                        returns.append(daily_return)
-                        
-                if returns:
-                    avg_return = sum(returns) / len(returns)
-                    std_return = (sum((r - avg_return) ** 2 for r in returns) / len(returns)) ** 0.5 if len(returns) > 1 else 0
-                    
-                    # Annual risk-free rate (e.g., 2%)
-                    risk_free_rate = 0.02 
-                    # Convert to daily rate
-                    daily_rf_rate = (1 + risk_free_rate) ** (1/252) - 1
-                    
-                    # Calculate Sharpe ratio
-                    sharpe_ratio = ((avg_return - daily_rf_rate) / std_return) * np.sqrt(252) if std_return > 0 else 0.0
-                    
-                    # Calculate Sortino ratio (downside risk)
-                    negative_returns = [r for r in returns if r < 0]
-                    downside_std = (sum(r ** 2 for r in negative_returns) / len(negative_returns)) ** 0.5 if negative_returns else 0
-                    sortino_ratio = ((avg_return - daily_rf_rate) / downside_std) * np.sqrt(252) if downside_std > 0 else 0.0
-                else:
-                    sharpe_ratio = 0.0
-                    sortino_ratio = 0.0
+                # Ensure datetime column exists and is sorted
+                if 'datetime' not in market_data.columns:
+                    logger.error(f"No datetime column found in market data for {symbol}")
+                    continue
                 
-                # Log results
-                logger.info(
-                    f"Backtest abgeschlossen:\n"
-                    f"  Rendite: {return_percentage:.2f}%\n"
-                    f"  Win-Rate: {win_rate:.2f}%\n"
-                    f"  Sharpe: {sharpe_ratio:.2f}\n"
-                    f"  Max Drawdown: {max_drawdown:.2f}%\n"
-                    f"  Sortino: {sortino_ratio}"
-                )
+                # Sort by date and remove duplicates
+                market_data = market_data.sort_values('datetime')
+                market_data = market_data.drop_duplicates(subset=['datetime'])
                 
-                # Return detailed results
-                return {
-                    'initial_balance': initial_balance,
-                    'final_balance': equity_curve[-1][1] if equity_curve else initial_balance,
-                    'return_percentage': return_percentage,
-                    'total_trades': total_trades,
-                    'winning_trades': winning_trades,
-                    'losing_trades': losing_trades,
-                    'win_rate': win_rate,
-                    'max_drawdown': max_drawdown,
-                    'sharpe_ratio': sharpe_ratio,
-                    'sortino_ratio': sortino_ratio,
-                    'equity_curve': equity_curve,
-                    'trades': [trade for symbol_data in self.backtest_data.values() for trade in symbol_data['trades']]
-                }
+                # Add technical indicators
+                market_data = self._add_indicators(market_data)
+                
+                # Generate signals using strategy
+                market_data = self.strategy.generate_signals(market_data)
+                
+                logger.info(f"Loaded {len(market_data)} candles for {symbol}")
+                logger.info(f"Buy signals: {market_data['buy_signal'].sum()}, Sell signals: {market_data['sell_signal'].sum()}")
+                
+                all_market_data[symbol] = market_data
                 
             except Exception as e:
-                logger.error(f"Fehler während der Trading-Simulation: {e}")
-                logger.error(traceback.format_exc())
-                return self._get_empty_backtest_results()
+                logger.error(f"Error getting historical data for {symbol}: {e}")
+                continue
+        
+        if not all_market_data:
+            logger.error("No valid market data for any symbol, aborting backtest")
+            return {'error': 'No valid market data'}
+        
+        # Combined dataframe index for iteration
+        dates = sorted(set(pd.to_datetime(date) for symbol in all_market_data 
+                          for date in all_market_data[symbol]['datetime'].values))
+        
+        # Initialize equity curve with starting balance
+        for symbol in self.symbols:
+            self.equity_curve[symbol] = [(dates[0] if dates else datetime.now(), initial_balance)]
+        
+        # Simulate trading
+        logger.info("Simulating trades...")
+        
+        # Loop through each date
+        for current_date in dates:
+            # Process each symbol
+            for symbol in all_market_data:
+                # Get current day's data
+                current_data = all_market_data[symbol][all_market_data[symbol]['datetime'] == current_date]
+                
+                if current_data.empty:
+                    # No data for this symbol on this date
+                    continue
+                
+                current_row = current_data.iloc[0]
+                current_price = current_row['close']
+                
+                # Track unrealized P&L
+                if symbol in self.positions:
+                    position = self.positions[symbol]
+                    entry_price = position['entry_price']
+                    quantity = position['quantity']
+                    direction = position['direction']
+                    
+                    # Calculate unrealized P&L
+                    if direction == 'long':
+                        unrealized_pnl = (current_price - entry_price) * quantity
+                        unrealized_pnl_pct = (current_price - entry_price) / entry_price * 100
+                    else:  # short
+                        unrealized_pnl = (entry_price - current_price) * quantity
+                        unrealized_pnl_pct = (entry_price - current_price) / entry_price * 100
+                    
+                    # Update position info
+                    position['unrealized_pnl'] = unrealized_pnl
+                    position['unrealized_pnl_pct'] = unrealized_pnl_pct
+                    position['current_price'] = current_price
+                    
+                    # Check trailing stop
+                    if 'highest_price' in position and direction == 'long':
+                        if current_price > position['highest_price']:
+                            position['highest_price'] = current_price
+                            
+                            # Update trailing stop if enabled
+                            if self.trailing_stop_pct > 0:
+                                new_stop = current_price * (1 - self.trailing_stop_pct / 100)
+                                if 'stop_loss' not in position or new_stop > position['stop_loss']:
+                                    position['stop_loss'] = new_stop
+                                    position['stop_type'] = 'trailing'
+                        
+                        # Check if trailing stop triggered
+                        if 'stop_loss' in position and current_price <= position['stop_loss'] and position['stop_type'] == 'trailing':
+                            # Close position at trailing stop
+                            trade = self._handle_closed_trade(symbol, position, current_price, 
+                                                            'trailing_stop', current_date)
+                            del self.positions[symbol]
+                            
+                    elif 'lowest_price' in position and direction == 'short':
+                        if current_price < position['lowest_price']:
+                            position['lowest_price'] = current_price
+                            
+                            # Update trailing stop if enabled
+                            if self.trailing_stop_pct > 0:
+                                new_stop = current_price * (1 + self.trailing_stop_pct / 100)
+                                if 'stop_loss' not in position or new_stop < position['stop_loss']:
+                                    position['stop_loss'] = new_stop
+                                    position['stop_type'] = 'trailing'
+                        
+                        # Check if trailing stop triggered
+                        if 'stop_loss' in position and current_price >= position['stop_loss'] and position['stop_type'] == 'trailing':
+                            # Close position at trailing stop
+                            trade = self._handle_closed_trade(symbol, position, current_price, 
+                                                            'trailing_stop', current_date)
+                            del self.positions[symbol]
+                    
+                    # Check fixed stop loss and take profit
+                    if direction == 'long':
+                        # Check stop loss
+                        if 'stop_loss' in position and current_price <= position['stop_loss'] and position['stop_type'] == 'fixed':
+                            # Close position at stop loss
+                            trade = self._handle_closed_trade(symbol, position, current_price, 
+                                                            'stop_loss', current_date)
+                            del self.positions[symbol]
+                            
+                        # Check take profit
+                        elif 'take_profit' in position and current_price >= position['take_profit']:
+                            # Close position at take profit
+                            trade = self._handle_closed_trade(symbol, position, current_price, 
+                                                            'take_profit', current_date)
+                            del self.positions[symbol]
+                            
+                    else:  # short
+                        # Check stop loss
+                        if 'stop_loss' in position and current_price >= position['stop_loss'] and position['stop_type'] == 'fixed':
+                            # Close position at stop loss
+                            trade = self._handle_closed_trade(symbol, position, current_price, 
+                                                            'stop_loss', current_date)
+                            del self.positions[symbol]
+                            
+                        # Check take profit
+                        elif 'take_profit' in position and current_price <= position['take_profit']:
+                            # Close position at take profit
+                            trade = self._handle_closed_trade(symbol, position, current_price, 
+                                                            'take_profit', current_date)
+                            del self.positions[symbol]
+                
+                # Process signals
+                # Buy signal for long positions
+                if current_row['buy_signal'] == 1 and symbol not in self.positions and len(self.positions) < self.max_positions:
+                    # Calculate signal strength (0.5 to 1.0 based on indicators)
+                    signal_strength = self._calculate_signal_strength(current_data)
+                    
+                    # Calculate position size
+                    quantity = self._calculate_position_size(symbol, all_market_data[symbol][:current_data.index[0]+1], signal_strength)
+                    
+                    if quantity > 0:
+                        # Calculate stop loss based on ATR
+                        atr_col = 'atr_14'
+                        atr = current_row[atr_col] if atr_col in current_row and not np.isnan(current_row[atr_col]) else current_price * 0.01
+                        
+                        # Check if the OrderBookManager can provide optimal stop loss levels
+                        stop_loss_level = current_price * (1 - self.risk_percentage / 100)  # Default based on risk percentage
+                        take_profit_level = current_price * (1 + self.risk_percentage * 2 / 100)  # Default 2:1 risk/reward
+                        
+                        # In a real system, we would use the OrderBookManager to determine optimal levels
+                        
+                        # Open long position
+                        position = {
+                            'direction': 'long',
+                            'entry_price': current_price,
+                            'quantity': quantity,
+                            'entry_time': current_date,
+                            'stop_loss': stop_loss_level,
+                            'stop_type': 'fixed',
+                            'take_profit': take_profit_level,
+                            'highest_price': current_price,
+                            'unrealized_pnl': 0,
+                            'unrealized_pnl_pct': 0,
+                            'signal_strength': signal_strength
+                        }
+                        
+                        self.positions[symbol] = position
+                        logger.info(f"BACKTEST: {current_date} - Opening LONG position for {symbol} at {current_price}, "
+                                 f"qty: {quantity}, stop: {stop_loss_level:.2f}, target: {take_profit_level:.2f}")
+                
+                # Sell signal for short positions
+                elif current_row['sell_signal'] == 1 and symbol not in self.positions and len(self.positions) < self.max_positions:
+                    # Calculate signal strength (0.5 to 1.0 based on indicators)
+                    signal_strength = self._calculate_signal_strength(current_data)
+                    
+                    # Calculate position size
+                    quantity = self._calculate_position_size(symbol, all_market_data[symbol][:current_data.index[0]+1], signal_strength)
+                    
+                    if quantity > 0:
+                        # Calculate stop loss based on ATR
+                        atr_col = 'atr_14'
+                        atr = current_row[atr_col] if atr_col in current_row and not np.isnan(current_row[atr_col]) else current_price * 0.01
+                        
+                        # Default stop loss and take profit levels
+                        stop_loss_level = current_price * (1 + self.risk_percentage / 100)  # Default based on risk percentage
+                        take_profit_level = current_price * (1 - self.risk_percentage * 2 / 100)  # Default 2:1 risk/reward
+                        
+                        # Open short position
+                        position = {
+                            'direction': 'short',
+                            'entry_price': current_price,
+                            'quantity': quantity,
+                            'entry_time': current_date,
+                            'stop_loss': stop_loss_level,
+                            'stop_type': 'fixed',
+                            'take_profit': take_profit_level,
+                            'lowest_price': current_price,
+                            'unrealized_pnl': 0,
+                            'unrealized_pnl_pct': 0,
+                            'signal_strength': signal_strength
+                        }
+                        
+                        self.positions[symbol] = position
+                        logger.info(f"BACKTEST: {current_date} - Opening SHORT position for {symbol} at {current_price}, "
+                                 f"qty: {quantity}, stop: {stop_loss_level:.2f}, target: {take_profit_level:.2f}")
+                
+                # Exit signal for existing positions
+                elif (current_row['sell_signal'] == 1 and symbol in self.positions and self.positions[symbol]['direction'] == 'long') or \
+                     (current_row['buy_signal'] == 1 and symbol in self.positions and self.positions[symbol]['direction'] == 'short'):
+                    # Close position on exit signal
+                    position = self.positions[symbol]
+                    trade = self._handle_closed_trade(symbol, position, current_price, 'exit_signal', current_date)
+                    del self.positions[symbol]
+            
+            # Update equity curve at end of day
+            for symbol in self.symbols:
+                if symbol in self.equity_curve:
+                    self.equity_curve[symbol].append((current_date, self.initial_capital))
+        
+        # Close any remaining positions at the end of the simulation
+        for symbol in list(self.positions.keys()):
+            position = self.positions[symbol]
+            last_price = all_market_data[symbol]['close'].iloc[-1]
+            trade = self._handle_closed_trade(symbol, position, last_price, 'end_of_simulation', end_date)
+            del self.positions[symbol]
+        
+        # Calculate backtest metrics
+        results = {}
+        for symbol in self.symbols:
+            if symbol in self.trade_history and self.trade_history[symbol]:
+                metrics = self._calculate_backtest_metrics(self.trade_history[symbol], self.initial_capital, self.initial_capital)
+                results[symbol] = metrics
+        
+        # Overall results
+        total_trades = sum(len(self.trade_history.get(symbol, [])) for symbol in self.symbols)
+        winning_trades = sum(sum(1 for trade in self.trade_history.get(symbol, []) if trade['pnl'] > 0) for symbol in self.symbols)
+        total_pnl = sum(sum(trade['pnl'] for trade in self.trade_history.get(symbol, [])) for symbol in self.symbols)
+        
+        win_rate = winning_trades / total_trades if total_trades > 0 else 0
+        return_pct = (self.initial_capital - initial_balance) / initial_balance * 100 if initial_balance > 0 else 0
+        
+        # Get metrics from the performance tracker
+        overall_metrics = self.performance_tracker.get_metrics()
+        
+        results['overall'] = {
+            'start_capital': initial_balance,
+            'end_capital': self.initial_capital,
+            'total_return': return_pct,
+            'total_trades': total_trades,
+            'winning_trades': winning_trades,
+            'win_rate': win_rate * 100,
+            'profit_factor': overall_metrics.get('profit_factor', 0),
+            'sharpe_ratio': overall_metrics.get('sharpe_ratio', 0),
+            'sortino_ratio': overall_metrics.get('sortino_ratio', 0),
+            'max_drawdown': overall_metrics.get('max_drawdown', 0),
+            'backtest_duration': time.time() - start_time
+        }
+        
+        logger.info(f"Backtest completed in {time.time() - start_time:.2f} seconds")
+        logger.info(f"Start capital: ${initial_balance:.2f}, End capital: ${self.initial_capital:.2f}")
+        logger.info(f"Return: {return_pct:.2f}%, Number of trades: {total_trades}, Win rate: {win_rate*100:.2f}%")
+        logger.info(f"Maximum drawdown: {overall_metrics.get('max_drawdown', 0):.2f}%, Sharpe Ratio: {overall_metrics.get('sharpe_ratio', 0):.2f}")
+        
+        return results
+
+    def _calculate_position_size(self, symbol, market_data, signal_strength=1.0):
+        """
+        Calculate the position size for a trade based on risk parameters.
+        
+        Args:
+            symbol: The trading symbol
+            market_data: Market data for the symbol
+            signal_strength: Strength of the trading signal (0.0 to 1.0)
+            
+        Returns:
+            Quantity to buy/sell
+        """
+        try:
+            # Get account balance
+            if self.use_testnet:
+                account_balance = self.initial_capital
+            else:
+                account_balance = self.order_executor.get_account_balance()['USDT']
+                
+            # Get the current price
+            current_price = market_data['close'].iloc[-1]
+            
+            if account_balance <= 0 or current_price <= 0:
+                logger.warning(f"Invalid account balance ({account_balance}) or price ({current_price})")
+                return 0
+                
+            # Check for available liquidity
+            has_liquidity = True
+            slippage = 0.0
+            
+            if not self.use_testnet and self.order_book_manager:
+                # Check if there's enough liquidity and calculate potential slippage
+                has_liquidity = self.order_book_manager.is_enough_liquidity(symbol, account_balance * self.risk_percentage / 100)
+                if has_liquidity:
+                    slippage = self.order_book_manager.calculate_slippage(symbol, account_balance * self.risk_percentage / 100)
+                    # Adjust price for slippage
+                    if slippage > 0:
+                        logger.info(f"Estimated slippage for {symbol}: {slippage:.2f}%")
+                        current_price = current_price * (1 + slippage/100)
+            
+            # Get optimal position size from performance tracker if available
+            if len(self.performance_tracker.trades) >= 10:
+                # Use Kelly Criterion-based position sizing
+                risk_pct = self.performance_tracker.calculate_optimal_position_size(
+                    symbol, 
+                    account_balance,
+                    risk_factor=0.5  # Half-Kelly for safety
+                )
+                logger.info(f"Using Kelly position sizing for {symbol}: {risk_pct*100:.2f}%")
+            else:
+                # Use base risk percentage adjusted by signal strength
+                adjusted_risk = self.risk_percentage * min(1.0, signal_strength)
+                risk_pct = adjusted_risk / 100  # Convert percentage to decimal
+                logger.info(f"Using standard position sizing for {symbol}: {adjusted_risk:.2f}%")
+                
+            # Calculate position size based on risk percentage
+            position_value = account_balance * risk_pct
+            quantity = position_value / current_price
+            
+            # Round quantity based on symbol filters if available
+            if not self.is_backtest:
+                try:
+                    symbol_filters = self.order_executor.get_symbol_filters(symbol)
+                    step_size = symbol_filters['LOT_SIZE']['step_size']
+                    min_qty = symbol_filters['LOT_SIZE']['min_qty']
+                
+                    # Ensure quantity meets minimum requirements
+                    quantity = max(quantity, min_qty)
+                    
+                    # Round to valid step size
+                    quantity = self.order_executor.round_step_size(quantity, step_size)
+                except Exception as e:
+                    logger.error(f"Error calculating position size: {e}")
+                    # Default to simple rounding for backtesting
+                    quantity = round(quantity, 6)
+            else:
+                # For backtesting, use simple rounding as we don't have actual symbol filters
+                # These are typical values for BTC and most major cryptocurrencies
+                default_step_size = 0.00001
+                default_min_qty = 0.00001
+                
+                # Ensure quantity meets minimum requirements
+                quantity = max(quantity, default_min_qty)
+                
+                # Round to a reasonable precision for backtesting
+                precision = 5  # 5 decimals is reasonable for most cryptocurrencies
+                quantity = round(quantity, precision)
+            
+            logger.info(f"Calculated position size for {symbol}: {quantity} (value: ${position_value:.2f})")
+            return quantity
             
         except Exception as e:
-            logger.error(f"Kritischer Fehler beim Backtest: {e}")
-            logger.error(traceback.format_exc())
-            return self._get_empty_backtest_results()
-    
+            logger.error(f"Error in position size calculation: {e}")
+            return 0
+
+    def _handle_closed_trade(self, symbol, position, exit_price, exit_reason, exit_time=None):
+        """
+        Process a closed trade, update statistics and trade history.
+        
+        Args:
+            symbol: Trading symbol
+            position: The position that was closed
+            exit_price: The exit price
+            exit_reason: Reason for exit (take_profit, stop_loss, etc.)
+            exit_time: The exit time (optional, defaults to current time)
+        """
+        if not exit_time:
+            exit_time = datetime.now()
+            
+        entry_time = position.get('entry_time', datetime.now())
+        entry_price = position.get('entry_price', 0)
+        quantity = position.get('quantity', 0)
+        direction = position.get('direction', 'long')
+        
+        # Calculate P&L
+        if direction == 'long':
+            pnl = (exit_price - entry_price) * quantity
+            pnl_pct = (exit_price - entry_price) / entry_price * 100
+        else:  # short
+            pnl = (entry_price - exit_price) * quantity
+            pnl_pct = (entry_price - exit_price) / entry_price * 100
+            
+        # Update account balance for backtesting/paper trading
+        if self.use_testnet:
+            self.initial_capital += pnl
+            
+        # Create trade record
+        trade = {
+            'symbol': symbol,
+            'direction': direction,
+            'entry_time': entry_time,
+            'exit_time': exit_time,
+            'entry_price': entry_price,
+            'exit_price': exit_price,
+            'quantity': quantity,
+            'pnl': pnl,
+            'pnl_pct': pnl_pct,
+            'exit_reason': exit_reason
+        }
+        
+        # Add trade to history
+        if symbol not in self.trade_history:
+            self.trade_history[symbol] = []
+        self.trade_history[symbol].append(trade)
+        
+        # Log the result
+        pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+        pnl_pct_str = f"+{pnl_pct:.2f}%" if pnl_pct >= 0 else f"-{abs(pnl_pct):.2f}%"
+        logger.info(f"Closed {direction} position for {symbol} - {exit_reason}. PnL: {pnl_str} ({pnl_pct_str})")
+        
+        # Update equity curve
+        timestamp = exit_time
+        if self.use_testnet:
+            timestamp = exit_time  # Use the provided timestamp for backtests
+        
+        if symbol not in self.equity_curve:
+            self.equity_curve[symbol] = []
+        
+        self.equity_curve[symbol].append((timestamp, self.initial_capital if self.use_testnet else 0))
+        
+        # Add to performance tracker
+        self.performance_tracker.add_trade(trade)
+        
+        return trade
+
+    def _add_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add technical indicators to the DataFrame.
+        
+        Args:
+            df: DataFrame with OHLCV data
+            
+        Returns:
+            DataFrame with added technical indicators
+        """
+        if df.empty:
+            logger.warning("Cannot add indicators to empty DataFrame")
+            return df
+            
+        try:
+            # Make a copy to avoid warnings
+            result_df = df.copy()
+            
+            # Add technical indicators using the indicators object
+            result_df = self.indicators.add_all_indicators(result_df)
+            
+            # Fill NaN values that might be created during indicator calculations
+            result_df = result_df.ffill().bfill()
+            
+            return result_df
+        except Exception as e:
+            logger.error(f"Error adding indicators: {e}")
+            return df
+
+    def _calculate_signal_strength(self, data: pd.DataFrame) -> float:
+        """
+        Calculate the signal strength based on various indicators.
+        
+        Args:
+            data: DataFrame with market data and indicators
+            
+        Returns:
+            Signal strength as a float between 0.5 and 1.0
+        """
+        try:
+            strength = 0.5  # Base strength
+            
+            # Use the last row if data is a DataFrame
+            if isinstance(data, pd.DataFrame) and not data.empty:
+                row = data.iloc[-1]
+            else:
+                # Handle case where data is a Series
+                row = data if isinstance(data, pd.Series) else None
+                
+            if row is None:
+                return strength
+                
+            # Add strength based on RSI
+            if 'rsi' in row:
+                rsi = row['rsi']
+                # RSI below 30 (oversold) for buy signals
+                if rsi < 30:
+                    strength += 0.1
+                # RSI below 20 (extremely oversold) for buy signals
+                if rsi < 20:
+                    strength += 0.1
+                    
+            # Add strength based on MACD
+            if 'macd_hist' in row:
+                macd_hist = row['macd_hist']
+                # Strong MACD histogram for buy signals
+                if macd_hist > 0:
+                    strength += 0.05
+                if macd_hist > 10:
+                    strength += 0.05
+                    
+            # Add strength based on Bollinger Bands
+            if 'bb_lower' in row and 'close' in row:
+                bb_lower = row['bb_lower']
+                close = row['close']
+                # Price near or below lower Bollinger Band for buy signals
+                if close < bb_lower * 1.01:
+                    strength += 0.1
+                    
+            # Cap strength between 0.5 and 1.0
+            return min(max(strength, 0.5), 1.0)
+            
+        except Exception as e:
+            logger.error(f"Error calculating signal strength: {e}")
+            return 0.5  # Default to medium strength
+
     def _calculate_position_size_simple(self, balance: float, price: float, risk_pct: float, signal_strength: float = 0.5) -> float:
         """
         Simple position size calculation for backtesting
@@ -644,3 +884,117 @@ class TradingBot:
             'equity_curve': [],
             'trades': []
         }
+
+    def _calculate_backtest_metrics(self, trades: List[Dict[str, Any]], initial_balance: float, final_balance: float) -> Dict[str, Any]:
+        """
+        Calculate performance metrics from backtest results.
+        
+        Args:
+            trades: List of completed trades from backtest
+            initial_balance: Starting account balance
+            final_balance: Ending account balance
+            
+        Returns:
+            Dictionary of calculated performance metrics
+        """
+        try:
+            results = {}
+            
+            # Overall metrics
+            total_trades = len(trades)
+            results['total_trades'] = total_trades
+            
+            if total_trades == 0:
+                logger.warning("No trades were executed in backtest, returning empty metrics")
+                return self._get_empty_backtest_results()
+            
+            # Calculate P&L metrics
+            results['start_capital'] = initial_balance
+            results['end_capital'] = final_balance
+            results['absolute_return'] = final_balance - initial_balance
+            results['total_return'] = ((final_balance - initial_balance) / initial_balance) * 100 if initial_balance > 0 else 0
+            
+            # Win/Loss metrics
+            winning_trades = [t for t in trades if t.get('profit', 0) > 0]
+            losing_trades = [t for t in trades if t.get('profit', 0) <= 0]
+            
+            results['winning_trades'] = len(winning_trades)
+            results['losing_trades'] = len(losing_trades)
+            results['win_rate'] = (len(winning_trades) / total_trades) * 100 if total_trades > 0 else 0
+            
+            # Calculate average win/loss
+            total_profit = sum(t.get('profit', 0) for t in winning_trades)
+            total_loss = sum(t.get('profit', 0) for t in losing_trades)
+            
+            results['total_profit'] = total_profit
+            results['total_loss'] = total_loss
+            results['net_profit'] = total_profit + total_loss
+            
+            results['average_win'] = total_profit / len(winning_trades) if winning_trades else 0
+            results['average_loss'] = total_loss / len(losing_trades) if losing_trades else 0
+            
+            # Calculate profit factor
+            results['profit_factor'] = abs(total_profit / total_loss) if total_loss != 0 else (1 if total_profit == 0 else float('inf'))
+            
+            # Calculate drawdown
+            if trades:
+                # Create equity curve
+                equity_curve = [initial_balance]
+                for trade in trades:
+                    equity_curve.append(equity_curve[-1] + trade.get('profit', 0))
+                
+                # Calculate max drawdown
+                max_equity = initial_balance
+                max_drawdown = 0
+                max_drawdown_pct = 0
+                
+                for equity in equity_curve:
+                    max_equity = max(max_equity, equity)
+                    drawdown = max_equity - equity
+                    drawdown_pct = (drawdown / max_equity) * 100 if max_equity > 0 else 0
+                    
+                    max_drawdown = max(max_drawdown, drawdown)
+                    max_drawdown_pct = max(max_drawdown_pct, drawdown_pct)
+                
+                results['max_drawdown'] = max_drawdown
+                results['max_drawdown_pct'] = max_drawdown_pct
+            else:
+                results['max_drawdown'] = 0
+                results['max_drawdown_pct'] = 0
+            
+            # Calculate risk metrics if there are enough trades
+            if total_trades >= 5:
+                # Convert trades to returns for risk calculations
+                returns = []
+                for trade in trades:
+                    profit_pct = trade.get('profit_pct', 0)
+                    returns.append(profit_pct / 100)  # Convert percentage to decimal
+                
+                returns = np.array(returns)
+                
+                # Calculate Sharpe ratio (assuming risk-free rate of 0)
+                avg_return = np.mean(returns)
+                std_dev = np.std(returns)
+                results['sharpe_ratio'] = (avg_return / std_dev) * np.sqrt(252) if std_dev > 0 else 0
+                
+                # Calculate Sortino ratio (using negative returns only)
+                negative_returns = returns[returns < 0]
+                downside_dev = np.std(negative_returns) if len(negative_returns) > 0 else 0.0001
+                results['sortino_ratio'] = (avg_return / downside_dev) * np.sqrt(252) if downside_dev > 0 else 0
+            else:
+                results['sharpe_ratio'] = 0
+                results['sortino_ratio'] = 0
+            
+            # Calculate average trade metrics
+            results['average_trade'] = results['net_profit'] / total_trades if total_trades > 0 else 0
+            results['average_trade_pct'] = results['total_return'] / total_trades if total_trades > 0 else 0
+            
+            # Calculate expectancy
+            results['expectancy'] = (results['win_rate'] / 100 * results['average_win']) + \
+                                   ((1 - results['win_rate'] / 100) * results['average_loss'])
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error calculating backtest metrics: {e}")
+            return self._get_empty_backtest_results()
