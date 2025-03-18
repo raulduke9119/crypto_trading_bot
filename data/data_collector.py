@@ -94,18 +94,18 @@ class DataCollector:
                 self.request_weight = 0
                 self.last_request_time = time.time()
 
-    def get_historical_data(self, symbol: str, interval: str, start_str: str = None, end_str: str = None) -> pd.DataFrame:
+    def get_historical_data(self, symbol: str, interval: str, start_str = None, end_str = None) -> pd.DataFrame:
         """
         Ruft historische Kryptowährungsdaten von Binance ab und konvertiert sie in ein Pandas DataFrame.
         
         Args:
             symbol: Das Handelspaar (z.B. "DOGEBTC")
             interval: Das Zeitintervall (z.B. "1h", "4h", "1d")
-            start_str: Startdatum als String (z.B. "2023-01-01") oder None für 1 Jahr zurück
-            end_str: Enddatum als String (z.B. "2023-12-31") oder None für aktuelles Datum
+            start_str: Startdatum als String (z.B. "2023-01-01") oder datetime-Objekt oder None für 1 Jahr zurück
+            end_str: Enddatum als String (z.B. "2023-12-31") oder datetime-Objekt oder None für aktuelles Datum
             
         Returns:
-            DataFrame mit historischen Daten (OHLCV-Format)
+            DataFrame mit historischen Daten (OHLCV-Format) und einer 'datetime' Spalte
         """
         # Prüfe und konvertiere Eingabeparameter
         if symbol is None or not isinstance(symbol, str) or len(symbol.strip()) == 0:
@@ -121,6 +121,13 @@ class DataCollector:
             
         if end_str is None:
             end_str = datetime.now().strftime("%Y-%m-%d")
+        
+        # Konvertiere datetime-Objekte in Strings
+        if isinstance(start_str, datetime):
+            start_str = start_str.strftime("%Y-%m-%d")
+            
+        if isinstance(end_str, datetime):
+            end_str = end_str.strftime("%Y-%m-%d")
         
         # Konvertiere Datums-Strings in Timestamps für Binance API
         try:
@@ -194,10 +201,12 @@ class DataCollector:
         if os.path.exists(cache_file):
             logger.info(f"Lade gespeicherte Daten aus {cache_file}")
             try:
-                df = pd.read_csv(cache_file)
+                df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
                 if 'timestamp' in df.columns:
                     df['timestamp'] = pd.to_datetime(df['timestamp'])
                     df.set_index('timestamp', inplace=True)
+                df.index.name = 'datetime'
+                df.reset_index(inplace=True)  # Stelle sicher, dass datetime eine Spalte ist
                 return df
             except Exception as e:
                 logger.warning(f"Fehler beim Laden der gespeicherten Daten: {e}. Lade neu von Binance.")
@@ -290,6 +299,29 @@ class DataCollector:
             logger.info(f"Daten in {cache_file} gespeichert")
         except Exception as e:
             logger.error(f"Fehler beim Speichern der Daten: {e}")
+        
+        # Stelle sicher, dass wir eine datetime-Spalte haben
+        if 'datetime' not in df.columns:
+            if df.index.name == 'datetime':
+                df.reset_index(inplace=True)
+            else:
+                # Falls kein datetime-Index existiert, erstelle eine datetime-Spalte
+                if 'timestamp' in df.columns:
+                    df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
+                elif 'open_time' in df.columns:
+                    df['datetime'] = pd.to_datetime(df['open_time'], unit='ms')
+                elif 'date' in df.columns:
+                    df['datetime'] = pd.to_datetime(df['date'])
+                else:
+                    # Verwende den Index als datetime, falls möglich
+                    try:
+                        df['datetime'] = pd.to_datetime(df.index)
+                    except:
+                        logger.error(f"Konnte keine datetime-Spalte für {symbol} erstellen")
+                
+        # Stelle sicher, dass datetime der richtige Typ ist
+        if 'datetime' in df.columns:
+            df['datetime'] = pd.to_datetime(df['datetime'])
         
         return df
     

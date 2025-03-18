@@ -1,0 +1,1339 @@
+# Ultimate Binance API Cheatsheet for Trading Bot Development
+
+## Base URLs & Endpoints
+
+```
+Production: https://api.binance.com
+Alternative: https://api-gcp.binance.com, https://api1.binance.com through https://api4.binance.com
+Market Data Only: https://data-api.binance.vision
+WebSocket: wss://stream.binance.vision/ws  
+           wss://stream.binance.vision/stream (combined streams)
+Testnet: https://testnet.binance.vision (for testing without real funds)
+```
+
+## Authentication
+
+```python
+# HMAC Authentication
+def get_signature(query_string, secret):
+    return hmac.new(
+        secret.encode('utf-8'),
+        query_string.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+# Signed Request Example
+def signed_request(method, endpoint, params, api_key, api_secret):
+    params['timestamp'] = int(time.time() * 1000)
+    query_string = urlencode(params)
+    signature = get_signature(query_string, api_secret)
+    url = f"https://api.binance.com{endpoint}?{query_string}&signature={signature}"
+    headers = {'X-MBX-APIKEY': api_key}
+    response = requests.request(method, url, headers=headers)
+    return response.json()
+```
+
+## Critical Response Headers
+
+```
+X-MBX-USED-WEIGHT-(intervalNum)(intervalLetter): Current weight usage
+X-MBX-ORDER-COUNT-(intervalNum)(intervalLetter): Current order count
+Retry-After: Seconds to wait after a 429/418 error
+```
+
+## Market Data Endpoints
+
+| Endpoint | Method | Weight | Required Params | Optional Params | Data Source |
+|----------|--------|--------|----------------|-----------------|-------------|
+| `/api/v3/ping` | GET | 1 | none | none | Memory |
+| `/api/v3/time` | GET | 1 | none | none | Memory |
+| `/api/v3/exchangeInfo` | GET | 20 | none | symbol/symbols, permissions | Memory |
+| `/api/v3/depth` | GET | 5-250 | symbol | limit (1-5000) | Memory |
+| `/api/v3/trades` | GET | 25 | symbol | limit (default 500, max 1000) | Memory |
+| `/api/v3/historicalTrades` | GET | 25 | symbol | limit, fromId | Database |
+| `/api/v3/aggTrades` | GET | 4 | symbol | fromId, startTime, endTime, limit | Database |
+| `/api/v3/klines` | GET | 2 | symbol, interval | startTime, endTime, timeZone, limit | Database |
+| `/api/v3/uiKlines` | GET | 2 | symbol, interval | startTime, endTime, timeZone, limit | Database |
+| `/api/v3/avgPrice` | GET | 2 | symbol | none | Memory |
+| `/api/v3/ticker/24hr` | GET | 2-80 | none | symbol/symbols, type (FULL/MINI) | Memory |
+| `/api/v3/ticker/price` | GET | 2-4 | none | symbol/symbols | Memory |
+| `/api/v3/ticker/bookTicker` | GET | 2-4 | none | symbol/symbols | Memory |
+| `/api/v3/ticker/tradingDay` | GET | 4/symbol | symbol/symbols | timeZone, type (FULL/MINI) | Database |
+| `/api/v3/ticker` | GET | 4/symbol | symbol/symbols | windowSize, type (FULL/MINI) | Database |
+
+## Trading Endpoints (Security: TRADE)
+
+| Endpoint | Method | Weight | Required Params | Optional Params | Data Source |
+|----------|--------|--------|----------------|-----------------|-------------|
+| `/api/v3/order/test` | POST | 1/20 | symbol, side, type | timeInForce, quantity, price, etc. | Memory |
+| `/api/v3/order` | POST | 1 | symbol, side, type | timeInForce, quantity, price, etc. | Matching Engine |
+| `/api/v3/order` | DELETE | 1 | symbol, orderId (or origClientOrderId) | newClientOrderId, cancelRestrictions | Matching Engine |
+| `/api/v3/order` | GET | 4 | symbol, orderId (or origClientOrderId) | none | Memory=>Database |
+| `/api/v3/openOrders` | GET | 6/80 | none | symbol | Memory=>Database |
+| `/api/v3/openOrders` | DELETE | 1 | symbol | none | Matching Engine |
+| `/api/v3/allOrders` | GET | 20 | symbol | orderId, startTime, endTime, limit | Database |
+| `/api/v3/orderList/oco` | POST | 1 | symbol, side, quantity, aboveType, belowType | abovePrice, aboveStopPrice, belowPrice, etc. | Matching Engine |
+| `/api/v3/orderList/oto` | POST | 1 | symbol, workingType, workingSide, workingPrice, workingQuantity, pendingType, pendingSide, pendingQuantity | pendingPrice, pendingStopPrice, etc. | Matching Engine |
+| `/api/v3/orderList/otoco` | POST | 1 | symbol, workingType, workingSide, workingPrice, workingQuantity, pendingSide, pendingQuantity, pendingAboveType, pendingBelowType | pendingAbovePrice, pendingBelowPrice, etc. | Matching Engine |
+| `/api/v3/orderList` | DELETE | 1 | symbol, orderListId (or listClientOrderId) | none | Matching Engine |
+| `/api/v3/sor/order` | POST | 1 | symbol, side, type | timeInForce, quantity, price, etc. | Matching Engine |
+| `/api/v3/sor/order/test` | POST | 1/20 | symbol, side, type | computeCommissionRates | Memory |
+
+## Account Endpoints (Security: USER_DATA)
+
+| Endpoint | Method | Weight | Required Params | Optional Params | Data Source |
+|----------|--------|--------|----------------|-----------------|-------------|
+| `/api/v3/account` | GET | 20 | none | omitZeroBalances | Memory=>Database |
+| `/api/v3/myTrades` | GET | 20 | symbol | orderId, startTime, endTime, fromId, limit | Memory=>Database |
+| `/api/v3/rateLimit/order` | GET | 40 | none | none | Memory |
+| `/api/v3/myPreventedMatches` | GET | 2-20 | symbol | preventedMatchId, orderId, fromPreventedMatchId, limit | Database |
+| `/api/v3/myAllocations` | GET | 20 | symbol | startTime, endTime, fromAllocationId, limit, orderId | Database |
+| `/api/v3/account/commission` | GET | 20 | symbol | none | Database |
+
+## User Data Stream Endpoints (Security: USER_STREAM)
+
+| Endpoint | Method | Weight | Required Params | Optional Params | Data Source |
+|----------|--------|--------|----------------|-----------------|-------------|
+| `/api/v3/userDataStream` | POST | 2 | none | none | Memory |
+| `/api/v3/userDataStream` | PUT | 2 | listenKey | none | Memory |
+| `/api/v3/userDataStream` | DELETE | 2 | listenKey | none | Memory |
+
+## WebSocket Streams Quick Reference
+
+| Stream Name | Format | Update Speed | Description |
+|-------------|--------|--------------|-------------|
+| Trade | `<symbol>@trade` | Real-time | Individual trades |
+| Kline/Candlestick | `<symbol>@kline_<interval>` | 1000/2000ms | Candlestick data |
+| Kline with Timezone | `<symbol>@kline_<interval>@+08:00` | 1000/2000ms | Candlestick with UTC+8 timezone |
+| Mini Ticker | `<symbol>@miniTicker` | 1000ms | 24hr mini ticker |
+| All Market Mini Tickers | `!miniTicker@arr` | 1000ms | All symbols mini tickers |
+| Ticker | `<symbol>@ticker` | 1000ms | 24hr ticker |
+| All Market Tickers | `!ticker@arr` | 1000ms | All symbols tickers |
+| Book Ticker | `<symbol>@bookTicker` | Real-time | Best bid/ask updates |
+| Partial Book Depth | `<symbol>@depth<levels>` or `<symbol>@depth<levels>@100ms` | 1000/100ms | Top bids and asks |
+| Diff. Depth | `<symbol>@depth` or `<symbol>@depth@100ms` | 1000/100ms | Order book updates |
+| User Data Stream | Connect to listenKey | Real-time | Account/order updates |
+
+## Common Order Parameters
+
+```python
+# LIMIT order (most common)
+limit_order = {
+    'symbol': 'BTCUSDT',
+    'side': 'BUY',          # BUY, SELL
+    'type': 'LIMIT',        
+    'timeInForce': 'GTC',   # GTC, IOC, FOK
+    'quantity': '0.001',    # Base asset quantity
+    'price': '25000',       # Limit price
+    
+    # Optional parameters
+    'newClientOrderId': 'myOrder123',     # Custom order ID
+    'icebergQty': '0.0005',               # For iceberg orders (must use GTC)
+    'selfTradePreventionMode': 'EXPIRE_TAKER'  # EXPIRE_TAKER, EXPIRE_MAKER, EXPIRE_BOTH, NONE
+}
+
+# MARKET order (quantity)
+market_order_qty = {
+    'symbol': 'BTCUSDT',
+    'side': 'BUY',
+    'type': 'MARKET',
+    'quantity': '0.001',    # Base asset quantity
+}
+
+# MARKET order (quote quantity)
+market_order_quote = {
+    'symbol': 'BTCUSDT',
+    'side': 'BUY',
+    'type': 'MARKET',
+    'quoteOrderQty': '25',  # Quote asset quantity (e.g. USDT)
+}
+
+# STOP_LOSS order
+stop_loss = {
+    'symbol': 'BTCUSDT',
+    'side': 'SELL',
+    'type': 'STOP_LOSS',
+    'quantity': '0.001',
+    'stopPrice': '24000',   # Triggers MARKET order when price reaches this level
+}
+
+# STOP_LOSS_LIMIT order
+stop_loss_limit = {
+    'symbol': 'BTCUSDT',
+    'side': 'SELL',
+    'type': 'STOP_LOSS_LIMIT',
+    'timeInForce': 'GTC',
+    'quantity': '0.001',
+    'price': '23900',       # Limit price once triggered
+    'stopPrice': '24000',   # Trigger price
+}
+
+# TRAILING_STOP order
+trailing_stop = {
+    'symbol': 'BTCUSDT',
+    'side': 'SELL',
+    'type': 'STOP_LOSS',
+    'quantity': '0.001',
+    'trailingDelta': 100,   # Value in basis points (0.01%), 100 = 1%
+}
+
+# LIMIT_MAKER order (post-only)
+limit_maker = {
+    'symbol': 'BTCUSDT',
+    'side': 'BUY',
+    'type': 'LIMIT_MAKER', 
+    'quantity': '0.001',
+    'price': '25000',       # Will be rejected if it would match immediately
+}
+```
+
+## Advanced Order Types
+
+### OCO Order (One-Cancels-the-Other)
+
+```python
+oco_order = {
+    'symbol': 'BTCUSDT',
+    'side': 'SELL',
+    'quantity': '0.001',
+    'aboveType': 'LIMIT_MAKER',  # or TAKE_PROFIT / TAKE_PROFIT_LIMIT
+    'abovePrice': '30000',       # Price for limit maker or TP limit
+    'aboveTimeInForce': 'GTC',   # Required for TAKE_PROFIT_LIMIT
+    'belowType': 'STOP_LOSS',    # or STOP_LOSS_LIMIT
+    'belowStopPrice': '20000',   # Trigger price for stop loss
+    'belowPrice': '19900',       # Required for STOP_LOSS_LIMIT
+    'belowTimeInForce': 'GTC',   # Required for STOP_LOSS_LIMIT
+}
+```
+
+### OTO Order (One-Triggers-the-Other)
+
+```python
+oto_order = {
+    'symbol': 'BTCUSDT',
+    'workingType': 'LIMIT',      # LIMIT or LIMIT_MAKER
+    'workingSide': 'BUY',
+    'workingPrice': '25000',
+    'workingQuantity': '0.001',
+    'workingTimeInForce': 'GTC',
+    'pendingType': 'STOP_LOSS',  # Any type except MARKET with quoteOrderQty
+    'pendingSide': 'SELL',
+    'pendingQuantity': '0.001',
+    'pendingStopPrice': '24000', # Required for stop orders
+}
+```
+
+## Order Cancellation with Restrictions
+
+```python
+# Cancel only if order is NEW
+cancel_params = {
+    'symbol': 'BTCUSDT',
+    'orderId': 12345,
+    'cancelRestrictions': 'ONLY_NEW'  # or 'ONLY_PARTIALLY_FILLED'
+}
+```
+
+## Error Codes for Fast Debugging
+
+| Code | Description | Debug Tips |
+|------|-------------|------------|
+| -1000 | UNKNOWN_ERROR | Check request format and parameters |
+| -1001 | DISCONNECTED | Network issue or server overload, implement retry logic |
+| -1003 | TOO_MANY_REQUESTS | Reduce request frequency, check rate limits |
+| -1013 | INVALID_MESSAGE | Request rejected, review parameters |
+| -1015 | TOO_MANY_ORDERS | Check order rate limits in headers |
+| -1021 | INVALID_TIMESTAMP | Synchronize system time, timestamp within recvWindow |
+| -1022 | INVALID_SIGNATURE | Verify signature algorithm and query string format |
+| -1100 | ILLEGAL_CHARS | Check parameter values for invalid characters |
+| -1102 | MANDATORY_PARAM_EMPTY_OR_MALFORMED | Ensure all required parameters are sent |
+| -1104 | UNREAD_PARAMETERS | Remove unnecessary parameters |
+| -1121 | INVALID_SYMBOL | Verify symbol exists and format (should be uppercase) |
+| -1145 | INVALID_CANCEL_RESTRICTIONS | Check cancelRestrictions value |
+| -2010 | NEW_ORDER_REJECTED | Check order parameters, might match immediately |
+| -2011 | CANCEL_REJECTED | Order might be already filled or canceled |
+| -2013 | NO_SUCH_ORDER | Order ID does not exist, check orderId/clientOrderId |
+| -2014 | BAD_API_KEY_FMT | API key format is invalid |
+| -2015 | REJECTED_MBX_KEY | API key is invalid, rejected, or IP not whitelisted |
+| -2021 | Order cancel-replace partially failed | One operation succeeded, the other failed |
+| -2022 | Order cancel-replace failed | Both operations failed |
+
+## Order Status Codes
+
+```
+NEW - Order accepted but not executed
+PARTIALLY_FILLED - Order partially filled
+FILLED - Order fully filled
+CANCELED - Order canceled by user
+PENDING_CANCEL - Cancellation in progress
+REJECTED - Order rejected by system
+EXPIRED - Order expired according to timeInForce
+EXPIRED_IN_MATCH - Order expired due to STP (self-trade prevention)
+PENDING_NEW - Working on placing the order
+```
+
+## Common HTTP Response Codes
+
+```
+200 - Success
+400 - Bad request
+401 - Unauthorized
+403 - WAF limit violated
+409 - Conflict (cancelReplace partial success)
+418 - IP banned for repeated violations
+429 - Rate limit exceeded
+500+ - Server error
+```
+
+## WebSocket Connection Management
+
+```python
+import json
+import websocket
+import threading
+import time
+
+class BinanceWebsocketManager:
+    def __init__(self, streams=None, user_stream=False, api_key=None):
+        self.streams = streams or []
+        self.user_stream = user_stream
+        self.api_key = api_key
+        self.listen_key = None
+        self.ws = None
+        self.running = False
+        
+    def start(self):
+        if self.user_stream:
+            self._get_listen_key()
+            self._start_keep_alive_timer()
+            ws_url = f"wss://stream.binance.vision/ws/{self.listen_key}"
+        elif len(self.streams) > 1:
+            stream_path = "/".join(self.streams)
+            ws_url = f"wss://stream.binance.vision/stream?streams={stream_path}"
+        elif len(self.streams) == 1:
+            ws_url = f"wss://stream.binance.vision/ws/{self.streams[0]}"
+        else:
+            raise ValueError("No streams specified")
+            
+        self.ws = websocket.WebSocketApp(
+            ws_url,
+            on_message=self._on_message,
+            on_error=self._on_error,
+            on_close=self._on_close,
+            on_open=self._on_open
+        )
+        
+        self.running = True
+        wst = threading.Thread(target=self.ws.run_forever)
+        wst.daemon = True
+        wst.start()
+        
+    def stop(self):
+        self.running = False
+        if self.ws:
+            self.ws.close()
+        if self.user_stream and self.listen_key:
+            self._close_listen_key()
+            
+    def _get_listen_key(self):
+        if not self.api_key:
+            raise ValueError("API key required for user data stream")
+        response = requests.post(
+            "https://api.binance.com/api/v3/userDataStream",
+            headers={'X-MBX-APIKEY': self.api_key}
+        )
+        self.listen_key = response.json()['listenKey']
+        
+    def _keep_alive_listen_key(self):
+        if self.running and self.listen_key:
+            try:
+                requests.put(
+                    "https://api.binance.com/api/v3/userDataStream",
+                    headers={'X-MBX-APIKEY': self.api_key},
+                    params={'listenKey': self.listen_key}
+                )
+            except Exception as e:
+                print(f"Error keeping listen key alive: {e}")
+                
+    def _start_keep_alive_timer(self):
+        def keep_alive_job():
+            while self.running:
+                self._keep_alive_listen_key()
+                time.sleep(30 * 60)  # 30 minutes
+        
+        timer_thread = threading.Thread(target=keep_alive_job)
+        timer_thread.daemon = True
+        timer_thread.start()
+        
+    def _close_listen_key(self):
+        try:
+            requests.delete(
+                "https://api.binance.com/api/v3/userDataStream",
+                headers={'X-MBX-APIKEY': self.api_key},
+                params={'listenKey': self.listen_key}
+            )
+        except Exception as e:
+            print(f"Error closing listen key: {e}")
+            
+    def _on_message(self, ws, message):
+        # Override this method in subclass to handle messages
+        data = json.loads(message)
+        print(f"Received message: {data}")
+        
+    def _on_error(self, ws, error):
+        print(f"Error: {error}")
+        
+    def _on_close(self, ws, close_status_code, close_msg):
+        print(f"Connection closed: {close_msg}")
+        
+    def _on_open(self, ws):
+        print("Connection opened")
+```
+
+## Order Book Management
+
+```python
+class OrderBookManager:
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self.bids = {}  # price -> quantity
+        self.asks = {}  # price -> quantity
+        self.last_update_id = 0
+        
+    def get_snapshot(self):
+        """Initialize order book with snapshot"""
+        response = requests.get(
+            "https://api.binance.com/api/v3/depth",
+            params={'symbol': self.symbol, 'limit': 1000}
+        )
+        data = response.json()
+        
+        # Store the lastUpdateId
+        self.last_update_id = data['lastUpdateId']
+        
+        # Process bids and asks
+        self.bids = {float(price): float(qty) for price, qty in data['bids']}
+        self.asks = {float(price): float(qty) for price, qty in data['asks']}
+        
+    def process_depth_event(self, event):
+        """Process a depth update event from WebSocket"""
+        # Discard events where u <= lastUpdateId
+        if event['u'] <= self.last_update_id:
+            return False
+            
+        # Discard events where U > lastUpdateId+1
+        if event['U'] > self.last_update_id + 1:
+            # Need to get a fresh snapshot
+            print("Orderbook out of sync, fetching snapshot")
+            self.get_snapshot()
+            return False
+            
+        # Process bid updates
+        for update in event['b']:
+            price = float(update[0])
+            quantity = float(update[1])
+            
+            if quantity == 0:
+                if price in self.bids:
+                    del self.bids[price]
+            else:
+                self.bids[price] = quantity
+                
+        # Process ask updates
+        for update in event['a']:
+            price = float(update[0])
+            quantity = float(update[1])
+            
+            if quantity == 0:
+                if price in self.asks:
+                    del self.asks[price]
+            else:
+                self.asks[price] = quantity
+                
+        # Update lastUpdateId
+        self.last_update_id = event['u']
+        return True
+        
+    def get_best_bid(self):
+        """Get best bid price and quantity"""
+        if not self.bids:
+            return None, None
+        best_price = max(self.bids.keys())
+        return best_price, self.bids[best_price]
+        
+    def get_best_ask(self):
+        """Get best ask price and quantity"""
+        if not self.asks:
+            return None, None
+        best_price = min(self.asks.keys())
+        return best_price, self.asks[best_price]
+        
+    def get_bid_price_at_quantity(self, target_qty):
+        """Get price level where cumulative bid quantity exceeds target"""
+        sorted_bids = sorted(self.bids.items(), reverse=True)  # High to low
+        cum_qty = 0
+        
+        for price, qty in sorted_bids:
+            cum_qty += qty
+            if cum_qty >= target_qty:
+                return price
+        return None
+        
+    def get_ask_price_at_quantity(self, target_qty):
+        """Get price level where cumulative ask quantity exceeds target"""
+        sorted_asks = sorted(self.asks.items())  # Low to high
+        cum_qty = 0
+        
+        for price, qty in sorted_asks:
+            cum_qty += qty
+            if cum_qty >= target_qty:
+                return price
+        return None
+        
+    def mid_price(self):
+        """Calculate mid price between best bid and ask"""
+        best_bid, _ = self.get_best_bid()
+        best_ask, _ = self.get_best_ask()
+        
+        if best_bid and best_ask:
+            return (best_bid + best_ask) / 2
+        return None
+```
+
+## Rate Limit Handling
+
+```python
+class RateLimitHandler:
+    def __init__(self, max_weight_per_minute=1200):
+        self.max_weight = max_weight_per_minute
+        self.current_weight = 0
+        self.last_reset_time = time.time()
+        self.lock = threading.Lock()
+        
+    def _check_and_reset(self):
+        """Reset weights if time window has passed"""
+        now = time.time()
+        if now - self.last_reset_time >= 60:  # 1 minute
+            self.current_weight = 0
+            self.last_reset_time = now
+            
+    def can_make_request(self, weight=1):
+        """Check if request can be made without exceeding limits"""
+        with self.lock:
+            self._check_and_reset()
+            return self.current_weight + weight <= self.max_weight
+            
+    def add_weight(self, weight=1):
+        """Add weight after making a request"""
+        with self.lock:
+            self._check_and_reset()
+            self.current_weight += weight
+            
+    def wait_if_needed(self, weight=1):
+        """Wait until request can be made"""
+        while True:
+            with self.lock:
+                self._check_and_reset()
+                if self.current_weight + weight <= self.max_weight:
+                    self.current_weight += weight
+                    return
+            time.sleep(0.1)
+            
+    def update_from_headers(self, headers):
+        """Update weights from response headers"""
+        with self.lock:
+            # Look for X-MBX-USED-WEIGHT-1M header
+            for header, value in headers.items():
+                if header.lower() == 'x-mbx-used-weight-1m':
+                    self.current_weight = int(value)
+                    break
+```
+
+## Specialized Functions for Trading Strategies
+
+### VWAP Calculation
+
+```python
+def calculate_vwap(trades):
+    """Calculate Volume-Weighted Average Price"""
+    total_volume = 0
+    total_value = 0
+    
+    for trade in trades:
+        price = float(trade['p'])
+        quantity = float(trade['q'])
+        
+        total_volume += quantity
+        total_value += price * quantity
+        
+    if total_volume == 0:
+        return None
+        
+    return total_value / total_volume
+```
+
+### Technical Indicators
+
+```python
+def calculate_moving_average(prices, period):
+    """Calculate simple moving average"""
+    if len(prices) < period:
+        return None
+    return sum(prices[-period:]) / period
+    
+def calculate_exponential_moving_average(prices, period):
+    """Calculate exponential moving average"""
+    if len(prices) < period:
+        return None
+        
+    ema = sum(prices[:period]) / period
+    multiplier = 2 / (period + 1)
+    
+    for price in prices[period:]:
+        ema = (price - ema) * multiplier + ema
+        
+    return ema
+    
+def calculate_rsi(prices, period=14):
+    """Calculate Relative Strength Index"""
+    if len(prices) < period + 1:
+        return None
+        
+    # Calculate price changes
+    deltas = [prices[i+1] - prices[i] for i in range(len(prices)-1)]
+    
+    # Separate gains (up) and losses (down)
+    gain = [delta if delta > 0 else 0 for delta in deltas]
+    loss = [-delta if delta < 0 else 0 for delta in deltas]
+    
+    # First average gain and loss
+    avg_gain = sum(gain[:period]) / period
+    avg_loss = sum(loss[:period]) / period
+    
+    # Calculate subsequent values
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gain[i]) / period
+        avg_loss = (avg_loss * (period - 1) + loss[i]) / period
+    
+    if avg_loss == 0:
+        return 100
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi
+```
+
+### Risk Management Functions
+
+```python
+def calculate_position_size(account_balance, risk_percentage, entry_price, stop_loss_price):
+    """Calculate position size based on risk"""
+    if entry_price == stop_loss_price:
+        return 0
+        
+    risk_amount = account_balance * (risk_percentage / 100)
+    price_risk = abs(entry_price - stop_loss_price)
+    
+    # For long positions
+    if entry_price > stop_loss_price:
+        position_size = risk_amount / price_risk
+    # For short positions
+    else:
+        position_size = risk_amount / price_risk
+        
+    return position_size
+    
+def calculate_kelly_criterion(win_rate, win_loss_ratio):
+    """Calculate optimal position size using Kelly Criterion"""
+    # win_rate: probability of winning (0-1)
+    # win_loss_ratio: average win / average loss
+    
+    kelly_percentage = win_rate - ((1 - win_rate) / win_loss_ratio)
+    
+    # Kelly can recommend betting more than 100% with leverage
+    # or negative values for unfavorable bets
+    return max(0, min(kelly_percentage, 1))
+```
+
+## Common WebSocket Message Handlers
+
+```python
+def handle_trade_message(msg):
+    """Handle trade stream message"""
+    data = msg.get('data', msg)  # Handle combined stream format
+    
+    symbol = data['s']
+    price = float(data['p'])
+    quantity = float(data['q'])
+    is_buyer_maker = data['m']
+    trade_time = data['T']
+    
+    print(f"Trade: {symbol}, Price: {price}, Qty: {quantity}, Buyer is maker: {is_buyer_maker}")
+    return {
+        'symbol': symbol,
+        'price': price,
+        'quantity': quantity,
+        'is_buyer_maker': is_buyer_maker,
+        'trade_time': trade_time
+    }
+    
+def handle_kline_message(msg):
+    """Handle kline/candlestick stream message"""
+    data = msg.get('data', msg)  # Handle combined stream format
+    
+    symbol = data['s']
+    kline = data['k']
+    
+    interval = kline['i']
+    open_time = kline['t']
+    close_time = kline['T']
+    open_price = float(kline['o'])
+    high_price = float(kline['h'])
+    low_price = float(kline['l'])
+    close_price = float(kline['c'])
+    volume = float(kline['v'])
+    is_closed = kline['x']
+    
+    print(f"Kline: {symbol}, Interval: {interval}, Close: {close_price}, Volume: {volume}")
+    return {
+        'symbol': symbol,
+        'interval': interval,
+        'open_time': open_time,
+        'close_time': close_time,
+        'open': open_price,
+        'high': high_price,
+        'low': low_price,
+        'close': close_price,
+        'volume': volume,
+        'is_closed': is_closed
+    }
+    
+def handle_book_ticker_message(msg):
+    """Handle book ticker stream message"""
+    data = msg.get('data', msg)  # Handle combined stream format
+    
+    symbol = data['s']
+    bid_price = float(data['b'])
+    bid_qty = float(data['B'])
+    ask_price = float(data['a'])
+    ask_qty = float(data['A'])
+    
+    print(f"BookTicker: {symbol}, Bid: {bid_price} x {bid_qty}, Ask: {ask_price} x {ask_qty}")
+    return {
+        'symbol': symbol,
+        'bid_price': bid_price,
+        'bid_qty': bid_qty,
+        'ask_price': ask_price,
+        'ask_qty': ask_qty
+    }
+    
+def handle_user_data_message(msg):
+    """Handle user data stream message"""
+    event_type = msg.get('e')
+    
+    if event_type == 'outboundAccountPosition':
+        # Balance update
+        update_time = msg['u']
+        balances = {}
+        for balance in msg['B']:
+            asset = balance['a']
+            free = float(balance['f'])
+            locked = float(balance['l'])
+            balances[asset] = {'free': free, 'locked': locked}
+        
+        print(f"Account update: {balances}")
+        return {'type': 'account_update', 'time': update_time, 'balances': balances}
+        
+    elif event_type == 'executionReport':
+        # Order update
+        symbol = msg['s']
+        side = msg['S']
+        order_type = msg['o']
+        order_status = msg['X']
+        order_id = msg['i']
+        client_order_id = msg['c']
+        executed_qty = float(msg['z'])
+        price = float(msg['p'])
+        
+        print(f"Order update: {symbol} {side} {order_type} {order_status}")
+        return {
+            'type': 'order_update',
+            'symbol': symbol,
+            'side': side,
+            'order_type': order_type,
+            'order_status': order_status,
+            'order_id': order_id,
+            'client_order_id': client_order_id,
+            'executed_qty': executed_qty,
+            'price': price
+        }
+        
+    elif event_type == 'balanceUpdate':
+        # Balance change (deposit/withdrawal)
+        asset = msg['a']
+        delta = float(msg['d'])
+        
+        print(f"Balance change: {asset} {delta:+}")
+        return {'type': 'balance_change', 'asset': asset, 'delta': delta}
+    
+    elif event_type == 'listStatus':
+        # Order list status update (OCO)
+        list_id = msg['g']
+        list_status = msg['l']
+        list_status_type = msg['s']
+        
+        print(f"List status: {list_id} {list_status}")
+        return {'type': 'list_status', 'list_id': list_id, 'status': list_status}
+        
+    return {'type': 'unknown', 'data': msg}
+    
+## Complete Trading Bot Template
+
+```python
+import time
+import hmac
+import hashlib
+import json
+import threading
+import logging
+from urllib.parse import urlencode
+import requests
+import websocket
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("trading_bot.log"),
+        logging.StreamHandler()
+    ]
+)
+
+class BinanceClient:
+    def __init__(self, api_key=None, api_secret=None, testnet=False):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.testnet = testnet
+        
+        # Base URLs
+        if testnet:
+            self.base_url = 'https://testnet.binance.vision'
+            self.ws_base_url = 'wss://stream.binance.vision:9443'
+        else:
+            self.base_url = 'https://api.binance.com'
+            self.ws_base_url = 'wss://stream.binance.vision'
+            
+        # Rate limit tracking
+        self.rate_limit = RateLimitHandler()
+        
+    def _get_headers(self):
+        headers = {
+            'Accept': 'application/json',
+            'User-Agent': 'BinanceTradingBot/1.0'
+        }
+        if self.api_key:
+            headers['X-MBX-APIKEY'] = self.api_key
+        return headers
+    
+    def _get_signature(self, query_string):
+        if not self.api_secret:
+            raise ValueError("API secret is required for signed endpoints")
+            
+        signature = hmac.new(
+            self.api_secret.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        return signature
+        
+    def _request(self, method, endpoint, signed=False, **kwargs):
+        # Prepare parameters
+        params = kwargs.get('params', {})
+        
+        # Add timestamp for signed requests
+        if signed:
+            params['timestamp'] = int(time.time() * 1000)
+            query_string = urlencode(params)
+            params['signature'] = self._get_signature(query_string)
+            
+        # Prepare request
+        url = f"{self.base_url}{endpoint}"
+        headers = self._get_headers()
+        
+        # Make request with rate limit handling
+        weight = kwargs.get('weight', 1)
+        self.rate_limit.wait_if_needed(weight)
+        
+        try:
+            response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params
+            )
+            
+            # Update rate limits from headers
+            self.rate_limit.update_from_headers(response.headers)
+            
+            # Handle response
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logging.error(f"API error: {response.status_code} {response.text}")
+                error_data = response.json()
+                raise BinanceAPIException(
+                    status_code=response.status_code,
+                    code=error_data.get('code', -1),
+                    message=error_data.get('msg', 'Unknown error')
+                )
+                
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request error: {e}")
+            raise
+            
+    # Public API Endpoints
+    def get_exchange_info(self, symbol=None):
+        """Get exchange trading rules and symbol information"""
+        params = {}
+        if symbol:
+            params['symbol'] = symbol
+            
+        return self._request(
+            method='GET',
+            endpoint='/api/v3/exchangeInfo',
+            params=params,
+            weight=20
+        )
+        
+    def get_ticker_price(self, symbol=None):
+        """Get current price for a symbol or all symbols"""
+        params = {}
+        if symbol:
+            params['symbol'] = symbol
+            
+        return self._request(
+            method='GET',
+            endpoint='/api/v3/ticker/price',
+            params=params,
+            weight=2 if symbol else 4
+        )
+        
+    def get_klines(self, symbol, interval, limit=500, start_time=None, end_time=None):
+        """Get kline/candlestick data"""
+        params = {
+            'symbol': symbol,
+            'interval': interval,
+            'limit': limit
+        }
+        
+        if start_time:
+            params['startTime'] = start_time
+        if end_time:
+            params['endTime'] = end_time
+            
+        return self._request(
+            method='GET',
+            endpoint='/api/v3/klines',
+            params=params,
+            weight=2
+        )
+        
+    def get_depth(self, symbol, limit=100):
+        """Get order book depth"""
+        params = {
+            'symbol': symbol,
+            'limit': limit
+        }
+        
+        # Weight varies based on limit
+        weight = 5
+        if limit > 100:
+            weight = 25
+        if limit > 500:
+            weight = 50
+        if limit > 1000:
+            weight = 250
+            
+        return self._request(
+            method='GET',
+            endpoint='/api/v3/depth',
+            params=params,
+            weight=weight
+        )
+        
+    # Trading Endpoints
+    def create_order(self, symbol, side, order_type, **kwargs):
+        """Create a new order"""
+        params = {
+            'symbol': symbol,
+            'side': side,
+            'type': order_type,
+            **kwargs
+        }
+        
+        # Add required parameters based on order type
+        if order_type == 'LIMIT':
+            if 'timeInForce' not in params:
+                params['timeInForce'] = 'GTC'
+            if 'price' not in params or 'quantity' not in params:
+                raise ValueError("LIMIT orders require price and quantity parameters")
+                
+        elif order_type == 'MARKET':
+            if 'quantity' not in params and 'quoteOrderQty' not in params:
+                raise ValueError("MARKET orders require either quantity or quoteOrderQty")
+                
+        return self._request(
+            method='POST',
+            endpoint='/api/v3/order',
+            signed=True,
+            params=params,
+            weight=1
+        )
+        
+    def cancel_order(self, symbol, order_id=None, orig_client_order_id=None):
+        """Cancel an open order"""
+        params = {'symbol': symbol}
+        
+        if order_id:
+            params['orderId'] = order_id
+        elif orig_client_order_id:
+            params['origClientOrderId'] = orig_client_order_id
+        else:
+            raise ValueError("Either orderId or origClientOrderId must be provided")
+            
+        return self._request(
+            method='DELETE',
+            endpoint='/api/v3/order',
+            signed=True,
+            params=params,
+            weight=1
+        )
+        
+    def get_order(self, symbol, order_id=None, orig_client_order_id=None):
+        """Check an order's status"""
+        params = {'symbol': symbol}
+        
+        if order_id:
+            params['orderId'] = order_id
+        elif orig_client_order_id:
+            params['origClientOrderId'] = orig_client_order_id
+        else:
+            raise ValueError("Either orderId or origClientOrderId must be provided")
+            
+        return self._request(
+            method='GET',
+            endpoint='/api/v3/order',
+            signed=True,
+            params=params,
+            weight=4
+        )
+        
+    def get_open_orders(self, symbol=None):
+        """Get all open orders"""
+        params = {}
+        if symbol:
+            params['symbol'] = symbol
+            
+        return self._request(
+            method='GET',
+            endpoint='/api/v3/openOrders',
+            signed=True,
+            params=params,
+            weight=6 if symbol else 80
+        )
+        
+    # Account Endpoints
+    def get_account(self, omit_zero_balances=False):
+        """Get current account information"""
+        params = {}
+        if omit_zero_balances:
+            params['omitZeroBalances'] = 'true'
+            
+        return self._request(
+            method='GET',
+            endpoint='/api/v3/account',
+            signed=True,
+            params=params,
+            weight=20
+        )
+        
+    def get_asset_balance(self, asset):
+        """Get balance for a specific asset"""
+        account = self.get_account(omit_zero_balances=True)
+        
+        for balance in account['balances']:
+            if balance['asset'] == asset:
+                return {
+                    'free': float(balance['free']),
+                    'locked': float(balance['locked'])
+                }
+                
+        return {'free': 0.0, 'locked': 0.0}
+        
+    # User Data Stream
+    def start_user_stream(self):
+        """Start a user data stream and return the listen key"""
+        response = self._request(
+            method='POST',
+            endpoint='/api/v3/userDataStream',
+            weight=2
+        )
+        return response['listenKey']
+        
+    def keep_user_stream_alive(self, listen_key):
+        """Ping a user data stream to keep it alive"""
+        params = {'listenKey': listen_key}
+        return self._request(
+            method='PUT',
+            endpoint='/api/v3/userDataStream',
+            params=params,
+            weight=2
+        )
+        
+    def close_user_stream(self, listen_key):
+        """Close a user data stream"""
+        params = {'listenKey': listen_key}
+        return self._request(
+            method='DELETE',
+            endpoint='/api/v3/userDataStream',
+            params=params,
+            weight=2
+        )
+
+class TradingStrategy:
+    def __init__(self, client, symbol, interval='1h'):
+        self.client = client
+        self.symbol = symbol
+        self.interval = interval
+        self.in_position = False
+        self.last_signal = None
+        self.running = False
+        
+        # Strategy parameters (example: Moving Average Crossover)
+        self.short_period = 9
+        self.long_period = 21
+        
+    def calculate_signals(self, klines):
+        """
+        Calculate trading signals based on strategy
+        Returns: 'BUY', 'SELL', or None
+        """
+        # Extract close prices
+        close_prices = [float(kline[4]) for kline in klines]
+        
+        # Calculate moving averages
+        if len(close_prices) < self.long_period:
+            return None
+            
+        short_ma = sum(close_prices[-self.short_period:]) / self.short_period
+        long_ma = sum(close_prices[-self.long_period:]) / self.long_period
+        
+        prev_short_ma = sum(close_prices[-self.short_period-1:-1]) / self.short_period
+        prev_long_ma = sum(close_prices[-self.long_period-1:-1]) / self.long_period
+        
+        # Generate signals based on crossovers
+        current_cross = short_ma > long_ma
+        prev_cross = prev_short_ma > prev_long_ma
+        
+        if current_cross and not prev_cross:
+            return 'BUY'
+        elif not current_cross and prev_cross:
+            return 'SELL'
+            
+        return None
+        
+    def execute_trade(self, signal):
+        """Execute trades based on signals"""
+        if signal == 'BUY' and not self.in_position:
+            try:
+                # Calculate position size (example: 10% of USDT balance)
+                balance = self.client.get_asset_balance('USDT')
+                if balance['free'] <= 10:  # Minimum order value
+                    logging.info("Insufficient balance for trade")
+                    return
+                    
+                trade_amount = balance['free'] * 0.1  # 10% of available balance
+                
+                # Get current price
+                ticker = self.client.get_ticker_price(self.symbol)
+                price = float(ticker['price'])
+                
+                # Calculate quantity
+                quantity = trade_amount / price
+                
+                # Place market buy order
+                order = self.client.create_order(
+                    symbol=self.symbol,
+                    side='BUY',
+                    order_type='MARKET',
+                    quantity=f"{quantity:.5f}"  # Format with 5 decimal places
+                )
+                
+                logging.info(f"BUY order placed: {order}")
+                self.in_position = True
+                self.last_signal = 'BUY'
+                
+            except Exception as e:
+                logging.error(f"Error executing BUY: {e}")
+                
+        elif signal == 'SELL' and self.in_position:
+            try:
+                # Get current position
+                base_asset = self.symbol.replace('USDT', '')
+                balance = self.client.get_asset_balance(base_asset)
+                
+                if balance['free'] <= 0:
+                    logging.info("No position to sell")
+                    return
+                    
+                # Place market sell order for entire position
+                order = self.client.create_order(
+                    symbol=self.symbol,
+                    side='SELL',
+                    order_type='MARKET',
+                    quantity=f"{balance['free']:.5f}"  # Format with 5 decimal places
+                )
+                
+                logging.info(f"SELL order placed: {order}")
+                self.in_position = False
+                self.last_signal = 'SELL'
+                
+            except Exception as e:
+                logging.error(f"Error executing SELL: {e}")
+                
+    def start(self):
+        """Start the trading strategy"""
+        self.running = True
+        threading.Thread(target=self._run_strategy_loop).start()
+        
+    def stop(self):
+        """Stop the trading strategy"""
+        self.running = False
+        
+    def _run_strategy_loop(self):
+        """Main strategy loop"""
+        logging.info(f"Starting trading strategy for {self.symbol}")
+        
+        while self.running:
+            try:
+                # Get latest klines
+                klines = self.client.get_klines(
+                    symbol=self.symbol,
+                    interval=self.interval,
+                    limit=50
+                )
+                
+                # Calculate signals
+                signal = self.calculate_signals(klines)
+                
+                if signal:
+                    logging.info(f"Signal generated: {signal}")
+                    self.execute_trade(signal)
+                
+                # Wait for next interval
+                time.sleep(60)  # Check every minute
+                
+            except Exception as e:
+                logging.error(f"Error in strategy loop: {e}")
+                time.sleep(60)  # Wait before retrying
+                
+class RateLimitHandler:
+    def __init__(self, max_weight_per_minute=1200):
+        self.max_weight = max_weight_per_minute
+        self.current_weight = 0
+        self.last_reset_time = time.time()
+        self.lock = threading.Lock()
+        
+    def _check_and_reset(self):
+        """Reset weights if time window has passed"""
+        now = time.time()
+        if now - self.last_reset_time >= 60:  # 1 minute
+            self.current_weight = 0
+            self.last_reset_time = now
+            
+    def can_make_request(self, weight=1):
+        """Check if request can be made without exceeding limits"""
+        with self.lock:
+            self._check_and_reset()
+            return self.current_weight + weight <= self.max_weight
+            
+    def add_weight(self, weight=1):
+        """Add weight after making a request"""
+        with self.lock:
+            self._check_and_reset()
+            self.current_weight += weight
+            
+    def wait_if_needed(self, weight=1):
+        """Wait until request can be made"""
+        while True:
+            with self.lock:
+                self._check_and_reset()
+                if self.current_weight + weight <= self.max_weight:
+                    self.current_weight += weight
+                    return
+            time.sleep(0.1)
+            
+    def update_from_headers(self, headers):
+        """Update weights from response headers"""
+        with self.lock:
+            # Look for X-MBX-USED-WEIGHT-1M header
+            for header, value in headers.items():
+                if header.lower() == 'x-mbx-used-weight-1m':
+                    self.current_weight = int(value)
+                    break
+                    
+class BinanceAPIException(Exception):
+    def __init__(self, status_code, code, message):
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+        super().__init__(f"{status_code} [{code}]: {message}")
+        
+# Example usage
+if __name__ == "__main__":
+    # Load API keys from config or environment variables
+    API_KEY = "your_api_key"
+    API_SECRET = "your_api_secret"
+    
+    # Initialize client
+    client = BinanceClient(api_key=API_KEY, api_secret=API_SECRET, testnet=True)
+    
+    # Start trading strategy
+    strategy = TradingStrategy(client, symbol="BTCUSDT", interval="1h")
+    strategy.start()
+    
+    try:
+        # Keep main thread alive
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        # Stop strategy on keyboard interrupt
+        strategy.stop()
+        logging.info("Trading bot stopped")
+```
+
+## Security Best Practices
+
+1. **Never hardcode API keys** - Store them in environment variables or secure configuration files
+2. **Use IP whitelisting** - Restrict API access to specific IP addresses
+3. **Limit API key permissions** - Only enable the permissions your bot needs
+4. **Enable withdrawal confirmation** - Require email/SMS confirmation for withdrawals
+5. **Use testnet first** - Test all strategies on testnet before using real funds
+6. **Implement circuit breakers** - Stop trading if losses exceed a threshold
+7. **Monitor logs** - Set up alerts for unusual activity
+8. **Regular security audits** - Review your code and trading logic periodically
+
+## Common Gotchas and Troubleshooting
+
+1. **Quantity precision errors** - Format quantities according to symbol's LOT_SIZE filter
+2. **Insufficient balance errors** - Account for fees when calculating trade quantities
+3. **Rate limit exceeded** - Implement proper rate limit handling with backoff
+4. **Network errors** - Add robust error handling and reconnection logic
+5. **Timestamp errors** - Ensure your system clock is synchronized
+6. **Order not found errors** - Verify order IDs and status before operations
+7. **Min notional errors** - Ensure order value meets minimum requirements
+8. **Book ticker vs. price ticker** - Use appropriate data source for your strategy
+9. **Unexpected fills** - Market orders may execute at unexpected prices in volatile markets
+10. **Websocket disconnects** - Implement proper reconnection and message buffering

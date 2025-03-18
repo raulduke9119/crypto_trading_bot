@@ -32,6 +32,10 @@ def validate_api_keys(use_testnet: bool = True) -> Tuple[str, str]:
 USE_TESTNET: bool = True  # Changed to True for testing
 API_KEY, API_SECRET = validate_api_keys(USE_TESTNET)
 
+# Exported for compatibility with start_trading_bot.py
+BINANCE_API_KEY = API_KEY
+BINANCE_API_SECRET = API_SECRET
+
 # Binance-Konfiguration
 BINANCE_CONFIG: Dict[str, Union[str, bool]] = {
     "API_KEY": API_KEY,
@@ -48,6 +52,7 @@ DEFAULT_TIMEFRAME: str = "5m"  # 5m timeframe has shown best risk/reward ratio
 # Risikomanagement - Optimized values based on backtesting
 MAX_POSITIONS: int = 3  # Increased to 3 for better diversification while maintaining control
 RISK_PERCENTAGE: float = 0.8  # Slightly more conservative risk per trade
+MAX_DRAWDOWN: float = 3.0  # Reduced from 5.0% for tighter risk control
 MAX_DRAWDOWN_PCT: float = 3.0  # Reduced from 5.0% for tighter risk control
 TRAILING_STOP_PCT: float = 0.8  # Optimized based on volatility testing
 VOLATILITY_ADJUSTMENT: bool = True  # Activate volatility adjustment

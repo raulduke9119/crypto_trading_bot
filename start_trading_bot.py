@@ -1,387 +1,203 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-Einfaches Startskript für den Binance Trading Bot.
-Bietet eine benutzerfreundliche Oberfläche zum Starten des Bots mit verschiedenen Konfigurationen.
+Starting script for the Binance Trading Bot.
+This script initializes and starts the trading bot based on command line arguments.
 """
-import os
-import sys
-import argparse
-import logging
-import time
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
 
-# Füge das Root-Verzeichnis zum Python-Pfad hinzu
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import os
+import argparse
+import sys
+import logging
+from datetime import datetime, timedelta
 
 from trading_bot import TradingBot
-from config.config import TRADING_SYMBOLS, DEFAULT_TIMEFRAME, LOG_LEVEL, LOG_FILE
-from utils.logger import setup_logger
+from config.config import (
+    DATA_DIRECTORY, LOG_LEVEL, LOG_FILE, BINANCE_API_KEY, 
+    BINANCE_API_SECRET, RISK_PERCENTAGE, MAX_POSITIONS, 
+    TRAILING_STOP_PCT, MAX_DRAWDOWN, INITIAL_CAPITAL
+)
 
-# Logger einrichten
-logger = setup_logger(LOG_FILE, LOG_LEVEL)
-
-def setup_argparse():
-    """
-    Konfiguriert den Argument-Parser für benutzerfreundliche Optionen.
-    """
-    parser = argparse.ArgumentParser(
-        description='Binance Trading Bot mit optimierter Multi-Indikator-Strategie',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
+def parse_arguments():
+    """Parse command line arguments for bot configuration."""
+    parser = argparse.ArgumentParser(description='Start Binance Trading Bot')
     
-    # Hauptbetriebsmodus
-    mode_group = parser.add_argument_group('Betriebsmodus')
-    mode_group.add_argument(
-        '--mode', '-m',
-        choices=['backtest', 'live', 'paper'],
-        default='paper',
-        help='Betriebsmodus: backtest = Historische Daten, live = Echtgeld-Trading, paper = Simuliertes Trading'
-    )
+    # Mode selection
+    parser.add_argument('--mode', type=str, choices=['live', 'paper', 'backtest'], default='paper',
+                        help='Trading mode: live (real trading), paper (simulated), or backtest')
     
-    # Trading-Konfiguration
-    trading_group = parser.add_argument_group('Trading-Konfiguration')
-    trading_group.add_argument(
-        '--symbols', '-s',
-        nargs='+',
-        default=['BTCUSDT'],
-        help='Trading-Symbole (z.B. BTCUSDT ETHUSDT SOLUSDT)'
-    )
-    trading_group.add_argument(
-        '--timeframe', '-t',
-        default=DEFAULT_TIMEFRAME,
-        help='Zeitintervall (z.B. 5m, 15m, 1h, 4h, 1d)'
-    )
-    trading_group.add_argument(
-        '--interval', '-i',
-        type=int,
-        default=15,
-        help='Update-Intervall in Minuten (nur im Live/Paper-Modus)'
-    )
+    # Symbol selection
+    parser.add_argument('--symbol', type=str, help='Trading symbol (e.g., BTCUSDT)')
+    parser.add_argument('--symbols', type=str, help='Comma-separated list of trading symbols')
     
-    # Risikomanagement
-    risk_group = parser.add_argument_group('Risikomanagement')
-    risk_group.add_argument(
-        '--risk', '-r',
-        type=float,
-        default=1.0,
-        help='Risikoprozentsatz pro Trade (1.0 = 1%% des Kapitals)'
-    )
-    risk_group.add_argument(
-        '--max-positions', '-p',
-        type=int,
-        default=2,
-        help='Maximale Anzahl gleichzeitiger Positionen'
-    )
-    risk_group.add_argument(
-        '--trailing-stop',
-        type=float,
-        default=1.5,
-        help='Trailing-Stop-Prozentsatz für Gewinnmitnahme'
-    )
-    risk_group.add_argument(
-        '--max-drawdown',
-        type=float,
-        default=5.0,
-        help='Maximaler erlaubter Drawdown in Prozent'
-    )
+    # Timeframe selection
+    parser.add_argument('--timeframe', type=str, default='1h', 
+                        help='Trading timeframe (e.g., 5m, 15m, 1h, 4h, 1d)')
     
-    # Backtest-Konfiguration
-    backtest_group = parser.add_argument_group('Backtest-Konfiguration')
-    backtest_group.add_argument(
-        '--start-date',
-        default=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
-        help='Startdatum für Backtest (YYYY-MM-DD)'
-    )
-    backtest_group.add_argument(
-        '--end-date',
-        default=None,
-        help='Enddatum für Backtest (YYYY-MM-DD, None = heute)'
-    )
-    backtest_group.add_argument(
-        '--initial-balance',
-        type=float,
-        default=1000.0,
-        help='Anfangskapital für Backtest in USDT'
-    )
+    # Backtest parameters
+    parser.add_argument('--start-date', type=str, help='Start date for backtest (YYYY-MM-DD)')
+    parser.add_argument('--end-date', type=str, help='End date for backtest (YYYY-MM-DD)')
+    parser.add_argument('--initial-capital', type=float, default=INITIAL_CAPITAL,
+                        help=f'Initial capital for backtest/paper trading (default: {INITIAL_CAPITAL})')
     
-    # Erweiterte Optionen
-    advanced_group = parser.add_argument_group('Erweiterte Optionen')
-    advanced_group.add_argument(
-        '--use-ml',
-        action='store_true',
-        help='ML-Vorhersagen aktivieren'
-    )
-    advanced_group.add_argument(
-        '--strategy',
-        choices=['multi_indicator', 'dogebtc_hf'],
-        default='multi_indicator',
-        help='Zu verwendende Trading-Strategie'
-    )
-    advanced_group.add_argument(
-        '--pattern',
-        type=str,
-        default='default_pattern.json',
-        help='Zu verwendendes Trading-Pattern (aus dem patterns/-Verzeichnis)'
-    )
-    advanced_group.add_argument(
-        '--testnet',
-        action='store_true',
-        help='Binance Testnet verwenden (für Live/Paper-Trading)'
-    )
-    advanced_group.add_argument(
-        '--log-level',
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        default='INFO',
-        help='Log-Level für die Protokollierung'
-    )
+    # Risk parameters
+    parser.add_argument('--risk', type=float, default=RISK_PERCENTAGE,
+                        help=f'Risk percentage per trade (default: {RISK_PERCENTAGE}%)')
+    parser.add_argument('--max-positions', type=int, default=MAX_POSITIONS,
+                        help=f'Maximum number of open positions (default: {MAX_POSITIONS})')
+    parser.add_argument('--trailing-stop', type=float, default=TRAILING_STOP_PCT,
+                        help=f'Trailing stop percentage (default: {TRAILING_STOP_PCT}%)')
+    parser.add_argument('--max-drawdown', type=float, default=MAX_DRAWDOWN,
+                        help=f'Maximum allowed drawdown (default: {MAX_DRAWDOWN}%)')
     
-    return parser
-
-def display_header():
-    """
-    Zeigt einen schönen ASCII-Header für den Trading Bot an.
-    """
-    header = """
-╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║   ██████╗ ██╗███╗   ██╗ █████╗ ███╗   ██╗ ██████╗███████╗   ║
-║   ██╔══██╗██║████╗  ██║██╔══██╗████╗  ██║██╔════╝██╔════╝   ║
-║   ██████╔╝██║██╔██╗ ██║███████║██╔██╗ ██║██║     █████╗     ║
-║   ██╔══██╗██║██║╚██╗██║██╔══██║██║╚██╗██║██║     ██╔══╝     ║
-║   ██████╔╝██║██║ ╚████║██║  ██║██║ ╚████║╚██████╗███████╗   ║
-║   ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝╚══════╝   ║
-║                                                              ║
-║                  TRADING BOT v1.0.0                          ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
-"""
-    print(header)
-
-def display_settings(args):
-    """
-    Zeigt die aktuellen Einstellungen übersichtlich an.
+    # Strategy selection
+    parser.add_argument('--strategy', type=str, default='multi_indicator',
+                        help='Trading strategy to use (default: multi_indicator)')
+    parser.add_argument('--pattern', type=str, help='JSON pattern file for signal generation')
     
-    Args:
-        args: Geparste Befehlszeilenargumente
-    """
-    settings = f"""
-╔══════════════════════════════════════════════════════════════╗
-║ TRADING BOT EINSTELLUNGEN                                    ║
-╠══════════════════════════════════════════════════════════════╣
-║ Betriebsmodus:      {args.mode:<42} ║
-║ Trading-Symbole:    {', '.join(args.symbols):<42} ║
-║ Zeitintervall:      {args.timeframe:<42} ║
-║ Update-Intervall:   {args.interval} Minuten{' ' * 31} ║
-║ Risikoprozentsatz:  {args.risk}%{' ' * 39} ║
-║ Max. Positionen:    {args.max_positions}{' ' * 41} ║
-║ Trailing-Stop:      {args.trailing_stop}%{' ' * 39} ║
-║ Max. Drawdown:      {args.max_drawdown}%{' ' * 39} ║
-║ ML-Vorhersagen:     {'Aktiviert' if args.use_ml else 'Deaktiviert':<42} ║
-║ Strategie:          {args.strategy:<42} ║
-║ Pattern:            {args.pattern:<42} ║
-║ Testnet:            {'Ja' if args.testnet else 'Nein':<42} ║
-╚══════════════════════════════════════════════════════════════╝
-"""
-    if args.mode == 'backtest':
-        backtest_settings = f"""
-╔══════════════════════════════════════════════════════════════╗
-║ BACKTEST EINSTELLUNGEN                                       ║
-╠══════════════════════════════════════════════════════════════╣
-║ Startdatum:         {args.start_date:<42} ║
-║ Enddatum:           {args.end_date if args.end_date else 'Heute':<42} ║
-║ Anfangskapital:     {args.initial_balance} USDT{' ' * 34} ║
-╚══════════════════════════════════════════════════════════════╝
-"""
-        settings += backtest_settings
+    # ML parameters
+    parser.add_argument('--use-ml', action='store_true', help='Use machine learning predictions')
     
-    print(settings)
-
-def display_warning():
-    """
-    Zeigt eine Warnung für den Live-Trading-Modus an.
-    """
-    warning = """
-╔══════════════════════════════════════════════════════════════╗
-║                        ⚠️ WARNUNG ⚠️                          ║
-╠══════════════════════════════════════════════════════════════╣
-║ Du hast den LIVE-TRADING-MODUS aktiviert.                    ║
-║ In diesem Modus wird mit echtem Geld gehandelt!              ║
-║                                                              ║
-║ Bitte stelle sicher, dass du:                                ║
-║ - Die Handelsstrategie verstehst                             ║
-║ - Die Risiken des Krypto-Handels kennst                      ║
-║ - Nie mehr Geld einsetzt, als du verlieren kannst            ║
-║                                                              ║
-║ Der Autor dieses Bots übernimmt keine Verantwortung für      ║
-║ eventuelle finanzielle Verluste.                             ║
-╚══════════════════════════════════════════════════════════════╝
-"""
-    print(warning)
+    # API parameters
+    parser.add_argument('--api-key', type=str, help='Binance API key (overrides config)')
+    parser.add_argument('--api-secret', type=str, help='Binance API secret (overrides config)')
+    parser.add_argument('--testnet', action='store_true', help='Use Binance testnet API')
     
-    while True:
-        response = input("Möchtest du wirklich fortfahren? (ja/nein): ").lower()
-        if response in ["ja", "j", "yes", "y"]:
-            break
-        elif response in ["nein", "n", "no"]:
-            print("Live-Trading abgebrochen. Beende Programm.")
-            sys.exit(0)
-        else:
-            print("Bitte antworte mit 'ja' oder 'nein'.")
-
-def run_live_trading(args):
-    """
-    Führt den Bot im Live- oder Paper-Trading-Modus aus.
+    # Logging parameters
+    parser.add_argument('--log-level', type=str, default=LOG_LEVEL,
+                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                        help=f'Logging level (default: {LOG_LEVEL})')
+    parser.add_argument('--log-file', type=str, default=LOG_FILE,
+                        help=f'Log file name (default: {LOG_FILE})')
     
-    Args:
-        args: Geparste Befehlszeilenargumente
-    """
-    # Initialisiere den Trading Bot
-    logger.info(f"Starte Trading Bot im {'PAPER' if args.mode == 'paper' else 'LIVE'}-Modus")
-    logger.info(f"Trading-Symbole: {', '.join(args.symbols)}")
+    # New order book manager parameters
+    parser.add_argument('--use-order-book', action='store_true', 
+                        help='Use order book for liquidity analysis and trade execution')
+    parser.add_argument('--order-book-depth', type=int, default=10,
+                        help='Depth of order book to use (default: 10)')
     
-    # Konfiguriere den Bot
-    bot = TradingBot(
-        use_testnet=args.testnet,
-        symbols=args.symbols,
-        timeframe=args.timeframe,
-        risk_percentage=args.risk,
-        max_positions=args.max_positions,
-        use_ml=args.use_ml,
-        pattern_name=args.pattern
-    )
+    # Performance tracker parameters
+    parser.add_argument('--kelly-factor', type=float, default=0.5,
+                        help='Kelly criterion factor for position sizing (default: 0.5, half-Kelly)')
+    parser.add_argument('--min-trades', type=int, default=10,
+                        help='Minimum number of trades before using Kelly criterion (default: 10)')
+    parser.add_argument('--history-file', type=str, 
+                        help='Path to trade history file for performance tracking')
     
-    # Teste die Verbindung
-    if not bot.test_connection():
-        logger.error("Verbindungstest fehlgeschlagen! Bitte API-Schlüssel überprüfen.")
-        return
-    
-    # Starte den Trading-Loop
-    logger.info(f"Trading-Loop gestartet (Update alle {args.interval} Minuten)")
-    
-    try:
-        # Initialer Daten-Update
-        market_data = bot.update_market_data()
-        if not market_data:
-            logger.error("Konnte keine Marktdaten abrufen. Beende Programm.")
-            return
-        
-        # Trading-Loop
-        while True:
-            # Update Marktdaten
-            market_data = bot.update_market_data()
-            
-            # Verarbeite Trading-Signale
-            for symbol, df in market_data.items():
-                if df is None or df.empty:
-                    logger.warning(f"Keine Daten für {symbol}")
-                    continue
-                
-                # Prüfe auf neue Signale (letzte Zeile)
-                last_row = df.iloc[-1]
-                if last_row.get('buy_signal', False):
-                    strength = last_row.get('buy_strength', 1.0)
-                    logger.info(f"BUY Signal für {symbol}: Stärke {strength}")
-                    
-                    # Führe Order aus (im Paper-Modus wird dies simuliert)
-                    if args.mode == 'live':
-                        bot.order_executor.execute_buy_order(symbol, strength)
-                
-                if last_row.get('sell_signal', False):
-                    strength = last_row.get('sell_strength', 1.0)
-                    logger.info(f"SELL Signal für {symbol}: Stärke {strength}")
-                    
-                    # Führe Order aus (im Paper-Modus wird dies simuliert)
-                    if args.mode == 'live':
-                        bot.order_executor.execute_sell_order(symbol, strength)
-            
-            # Warte bis zum nächsten Update
-            logger.info(f"Warte {args.interval} Minuten bis zum nächsten Update...")
-            time.sleep(args.interval * 60)  # Warte in Sekunden
-            
-    except KeyboardInterrupt:
-        logger.info("Trading-Loop durch Benutzer beendet (STRG+C)")
-    except Exception as e:
-        logger.error(f"Fehler im Trading-Loop: {e}", exc_info=True)
-
-def run_backtest(args):
-    """
-    Führt einen Backtest durch.
-    
-    Args:
-        args: Geparste Befehlszeilenargumente
-    """
-    logger.info(f"Starte Backtest von {args.start_date} bis {args.end_date or 'heute'}")
-    logger.info(f"Trading-Symbole: {', '.join(args.symbols)}, Anfangskapital: {args.initial_balance} USDT")
-    
-    # Initialisiere den Trading Bot
-    bot = TradingBot(
-        use_testnet=args.testnet,
-        symbols=args.symbols,
-        timeframe=args.timeframe,
-        risk_percentage=args.risk,
-        max_positions=args.max_positions,
-        initial_capital=args.initial_balance,
-        use_ml=args.use_ml,
-        pattern_name=args.pattern
-    )
-    
-    # Führe Backtest aus
-    results = bot.backtest(
-        start_date=args.start_date,
-        end_date=args.end_date,
-        initial_balance=args.initial_balance
-    )
-    
-    # Zeige Ergebnisse
-    if results:
-        print("\n=== Backtest-Ergebnisse ===")
-        print(f"Startkapital: ${args.initial_balance:.2f}")
-        print(f"Endkapital: ${results['final_balance']:.2f}")
-        print(f"Rendite: {results['return_percentage']:.2f}%")
-        print(f"Anzahl Trades: {results['total_trades']}")
-        print(f"Gewinnrate: {results['win_rate']:.2f}%")
-        print(f"Maximaler Drawdown: {results['max_drawdown']:.2f}%")
-        print(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
-    else:
-        logger.error("Backtest lieferte keine Ergebnisse.")
+    return parser.parse_args()
 
 def main():
-    """
-    Hauptfunktion für den Start des Trading Bots.
-    """
-    # Lade Umgebungsvariablen
-    load_dotenv()
+    """Main function to initialize and start the trading bot."""
+    # Parse command line arguments
+    args = parse_arguments()
     
-    # Zeige Header
-    display_header()
+    # Set up symbols list
+    symbols = []
+    if args.symbol:
+        symbols.append(args.symbol)
+    elif args.symbols:
+        symbols = [s.strip() for s in args.symbols.split(',')]
+    else:
+        # Default to BTC if no symbol specified
+        symbols = ['BTCUSDT']
     
-    # Parse Befehlszeilenargumente
-    parser = setup_argparse()
-    args = parser.parse_args()
+    # Create data directory if it doesn't exist
+    os.makedirs(DATA_DIRECTORY, exist_ok=True)
     
-    # Passe Log-Level an
-    if args.log_level:
-        logging.getLogger().setLevel(args.log_level)
+    # Set up logging
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(os.path.join(DATA_DIRECTORY, args.log_file)),
+            logging.StreamHandler()
+        ]
+    )
     
-    # Zeige Einstellungen
-    display_settings(args)
+    logger = logging.getLogger('trading_bot')
+    logger.info(f"Starting trading bot in {args.mode} mode")
     
-    # Zeige Warnung für Live-Trading
-    if args.mode == 'live':
-        display_warning()
+    # Create config dictionary
+    config = {
+        'symbols': symbols,
+        'timeframe': args.timeframe,
+        'api_key': args.api_key or BINANCE_API_KEY,
+        'api_secret': args.api_secret or BINANCE_API_SECRET,
+        'testnet': args.testnet,
+        'risk_percentage': args.risk,
+        'max_positions': args.max_positions,
+        'trailing_stop_pct': args.trailing_stop,
+        'max_drawdown': args.max_drawdown,
+        'strategy': args.strategy,
+        'log_level': args.log_level,
+        'log_file': args.log_file,
+        'use_ml_predictions': args.use_ml,
+        'pattern_file': args.pattern,
+        'use_order_book': args.use_order_book,
+        'order_book_depth': args.order_book_depth,
+        'kelly_factor': args.kelly_factor,
+        'min_trades': args.min_trades,
+        'history_file': args.history_file
+    }
     
-    # Starte den Bot im gewählten Modus
-    if args.mode == 'backtest':
-        run_backtest(args)
-    else:  # 'live' oder 'paper'
-        run_live_trading(args)
+    # Initialize trading bot
+    is_backtest = args.mode == 'backtest'
+    is_paper_trading = args.mode == 'paper'
+    
+    bot = TradingBot(config, is_backtest=is_backtest, is_paper_trading=is_paper_trading, 
+                     initial_balance=args.initial_capital)
+    
+    # Start trading based on mode
+    if is_backtest:
+        # Run backtest
+        if not args.start_date:
+            # Default to 1 month ago if not specified
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        else:
+            start_date = args.start_date
+            
+        end_date = args.end_date  # Can be None
+        
+        logger.info(f"Running backtest from {start_date} to {end_date or 'today'}")
+        
+        # Run backtest
+        results = bot.backtest(start_date, end_date, args.initial_capital)
+        
+        # Display results
+        logger.info("Backtest Results:")
+        overall = results.get('overall', {})
+        logger.info(f"Initial Capital: ${overall.get('start_capital', 0):.2f}")
+        logger.info(f"Final Capital: ${overall.get('end_capital', 0):.2f}")
+        logger.info(f"Return: {overall.get('total_return', 0):.2f}%")
+        logger.info(f"Number of Trades: {overall.get('total_trades', 0)}")
+        logger.info(f"Win Rate: {overall.get('win_rate', 0):.2f}%")
+        logger.info(f"Maximum Drawdown: {overall.get('max_drawdown', 0):.2f}%")
+        logger.info(f"Sharpe Ratio: {overall.get('sharpe_ratio', 0):.2f}")
+        logger.info(f"Sortino Ratio: {overall.get('sortino_ratio', 0):.2f}")
+        
+        # Print symbol-specific results
+        for symbol in symbols:
+            if symbol in results:
+                symbol_results = results[symbol]
+                logger.info(f"\n{symbol} Results:")
+                logger.info(f"Number of Trades: {symbol_results.get('total_trades', 0)}")
+                logger.info(f"Win Rate: {symbol_results.get('win_rate', 0):.2f}%")
+                logger.info(f"Profit Factor: {symbol_results.get('profit_factor', 0):.2f}")
+                logger.info(f"Average Win: ${symbol_results.get('average_win', 0):.2f}")
+                logger.info(f"Average Loss: ${symbol_results.get('average_loss', 0):.2f}")
+        
+        # Display performance summary from performance tracker if available
+        if hasattr(bot, 'performance_tracker'):
+            logger.info("\nPerformance Summary:")
+            logger.info(bot.performance_tracker.get_performance_summary())
+            
+    elif is_paper_trading:
+        # Run paper trading mode
+        logger.info("Starting paper trading mode")
+        bot.run()
+    else:
+        # Run live trading mode
+        logger.info("Starting live trading mode")
+        bot.run()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nProgramm durch Benutzer beendet (STRG+C).")
-    except Exception as e:
-        logger.error(f"Kritischer Fehler: {e}", exc_info=True)
-        sys.exit(1) 
+    main() 
