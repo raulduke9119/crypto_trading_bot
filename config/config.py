@@ -43,7 +43,7 @@ BINANCE_CONFIG: Dict[str, Union[str, bool]] = {
 
 # Trading-Parameter
 TRADING_SYMBOLS: List[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT"]
-DEFAULT_TIMEFRAME: str = "1h"  # Verfügbare Optionen: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
+DEFAULT_TIMEFRAME: str = "5m"  # Geändert von 1h auf 5m für Hochfrequenzhandel
 
 # Risikomanagement
 MAX_POSITIONS: int = 2  # Reduzierte Anzahl gleichzeitiger Positionen für besseres Risikomanagement

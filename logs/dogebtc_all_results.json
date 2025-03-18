@@ -1,0 +1,30 @@
+{
+    "1d": {
+        "timeframe": "1d",
+        "params": {
+            "bb_period": 20,
+            "bb_std": 2.0,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 3,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.0,
+            "atr_period": 14,
+            "atr_multiplier": 2.0,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -0.9999979720299979,
+        "max_drawdown": -0.048076923076922906,
+        "sharpe_ratio": -0.8890416916187569,
+        "win_ratio": 0.0,
+        "num_trades": 1
+    }
+}

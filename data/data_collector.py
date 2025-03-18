@@ -94,6 +94,244 @@ class DataCollector:
                 self.request_weight = 0
                 self.last_request_time = time.time()
 
+    def get_historical_data(self, symbol: str, interval: str, start_str: str = None, end_str: str = None) -> pd.DataFrame:
+        """
+        Ruft historische Kryptowährungsdaten von Binance ab und konvertiert sie in ein Pandas DataFrame.
+        
+        Args:
+            symbol: Das Handelspaar (z.B. "DOGEBTC")
+            interval: Das Zeitintervall (z.B. "1h", "4h", "1d")
+            start_str: Startdatum als String (z.B. "2023-01-01") oder None für 1 Jahr zurück
+            end_str: Enddatum als String (z.B. "2023-12-31") oder None für aktuelles Datum
+            
+        Returns:
+            DataFrame mit historischen Daten (OHLCV-Format)
+        """
+        # Prüfe und konvertiere Eingabeparameter
+        if symbol is None or not isinstance(symbol, str) or len(symbol.strip()) == 0:
+            raise ValueError("Symbol muss ein gültiger String sein")
+            
+        if interval is None or not isinstance(interval, str) or len(interval.strip()) == 0:
+            raise ValueError("Interval muss ein gültiger String sein")
+        
+        # Standardwerte für Start- und Enddatum, wenn nicht angegeben
+        if start_str is None:
+            start_date = datetime.now() - timedelta(days=365)  # 1 Jahr zurück
+            start_str = start_date.strftime("%Y-%m-%d")
+            
+        if end_str is None:
+            end_str = datetime.now().strftime("%Y-%m-%d")
+        
+        # Konvertiere Datums-Strings in Timestamps für Binance API
+        try:
+            # Unterstützung für relative Zeitangaben wie "1 day ago"
+            if isinstance(start_str, str) and "ago" in start_str:
+                # Parsen relativer Zeitangaben
+                parts = start_str.split()
+                if len(parts) >= 3 and parts[1] in ["day", "days", "week", "weeks", "month", "months"]:
+                    try:
+                        amount = int(parts[0])
+                        unit = parts[1].lower()
+                        
+                        if unit in ["day", "days"]:
+                            start_date = datetime.now() - timedelta(days=amount)
+                        elif unit in ["week", "weeks"]:
+                            start_date = datetime.now() - timedelta(weeks=amount)
+                        elif unit in ["month", "months"]:
+                            # Ungefähr 30.44 Tage pro Monat
+                            start_date = datetime.now() - timedelta(days=amount * 30.44)
+                            
+                        start_ts = int(start_date.timestamp() * 1000)
+                    except ValueError:
+                        raise ValueError(f"Ungültiges relatives Datumsformat: {start_str}")
+                else:
+                    raise ValueError(f"Ungültiges relatives Datumsformat: {start_str}")
+            else:
+                # Normales Datumsformat YYYY-MM-DD
+                start_ts = int(datetime.strptime(start_str, "%Y-%m-%d").timestamp() * 1000)
+            
+            # Ähnliche Behandlung für das Enddatum
+            if isinstance(end_str, str) and "ago" in end_str:
+                parts = end_str.split()
+                if len(parts) >= 3 and parts[1] in ["day", "days", "week", "weeks", "month", "months"]:
+                    try:
+                        amount = int(parts[0])
+                        unit = parts[1].lower()
+                        
+                        if unit in ["day", "days"]:
+                            end_date = datetime.now() - timedelta(days=amount)
+                        elif unit in ["week", "weeks"]:
+                            end_date = datetime.now() - timedelta(weeks=amount)
+                        elif unit in ["month", "months"]:
+                            end_date = datetime.now() - timedelta(days=amount * 30.44)
+                            
+                        # Setze auf Ende des Tages
+                        end_date = end_date.replace(hour=23, minute=59, second=59)
+                        end_ts = int(end_date.timestamp() * 1000)
+                    except ValueError:
+                        raise ValueError(f"Ungültiges relatives Datumsformat: {end_str}")
+                else:
+                    raise ValueError(f"Ungültiges relatives Datumsformat: {end_str}")
+            else:
+                # Normales Datumsformat YYYY-MM-DD
+                # Setze Enddatum auf Ende des Tages (23:59:59)
+                end_date = datetime.strptime(end_str, "%Y-%m-%d") + timedelta(days=1, microseconds=-1)
+                end_ts = int(end_date.timestamp() * 1000)
+        except Exception as e:
+            logger.error(f"Fehler bei der Datumskonvertierung: {e}")
+            raise ValueError(f"Ungültiges Datumsformat. Verwende 'YYYY-MM-DD' oder relatives Format (z.B. '1 day ago'): {e}")
+        
+        # Prüfe, ob Start vor Ende liegt
+        if start_ts >= end_ts:
+            raise ValueError(f"Startdatum {start_str} muss vor Enddatum {end_str} liegen")
+            
+        # Prüfe, ob Daten bereits lokal gespeichert sind
+        cache_file = os.path.join(
+            self.data_dir, 
+            f"{symbol}_{interval}_{start_str}_{end_str}.csv"
+        )
+        
+        if os.path.exists(cache_file):
+            logger.info(f"Lade gespeicherte Daten aus {cache_file}")
+            try:
+                df = pd.read_csv(cache_file)
+                if 'timestamp' in df.columns:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+                    df.set_index('timestamp', inplace=True)
+                return df
+            except Exception as e:
+                logger.warning(f"Fehler beim Laden der gespeicherten Daten: {e}. Lade neu von Binance.")
+        
+        # Daten von Binance abrufen
+        logger.info(f"Lade historische Daten für {symbol} von Binance...")
+        
+        # Maximale Anzahl von Datenpunkten pro Anfrage
+        limit = 1000
+        all_klines = []
+        
+        # Teile den Zeitraum in kleinere Abschnitte auf, um das Limit nicht zu überschreiten
+        current_start = start_ts
+        retry_count = 0
+        max_retries = 5
+        
+        while current_start < end_ts and retry_count < max_retries:
+            try:
+                # Rate-Limiting überprüfen
+                self._check_rate_limit()
+                
+                # Berechne das Ende dieses Abschnitts
+                current_end = min(current_start + (limit * self._get_interval_ms(interval)), end_ts)
+                
+                # Hole Kline-Daten
+                klines = self.historical_client.get_klines(
+                    symbol=symbol,
+                    interval=interval,
+                    startTime=current_start,
+                    endTime=current_end,
+                    limit=limit
+                )
+                
+                # Erhöhe das Gewicht für Rate-Limiting
+                self.request_weight += 1
+                
+                # Füge Daten zur Gesamtliste hinzu
+                if klines and isinstance(klines, list):
+                    all_klines.extend(klines)
+                    current_start = klines[-1][0] + 1  # Nächster Zeitpunkt nach dem letzten
+                    retry_count = 0  # Reset Retry-Counter bei Erfolg
+                else:
+                    # Keine Daten zurückgegeben, aber kein Fehler
+                    logger.warning(f"Keine Daten für {symbol} im Zeitraum {current_start} bis {current_end}")
+                    current_start = current_end + 1
+                
+            except Exception as e:
+                retry_count += 1
+                logger.error(f"Fehler beim Abrufen der Daten (Versuch {retry_count}/{max_retries}): {e}")
+                
+                # Versuche API-Fehler zu behandeln (z.B. URL wechseln)
+                if not self._handle_api_error(e, retry_count):
+                    # Wenn Fehlerbehandlung fehlschlägt, breche ab
+                    raise
+                
+                # Warte vor dem nächsten Versuch
+                time.sleep(2 ** retry_count)  # Exponentielles Backoff
+        
+        # Prüfe, ob Daten erfolgreich abgerufen wurden
+        if not all_klines:
+            raise ValueError(f"Keine Daten für {symbol} im Zeitraum {start_str} bis {end_str} gefunden")
+        
+        # Konvertiere Kline-Daten in DataFrame
+        df = pd.DataFrame(all_klines, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+        ])
+        
+        # Konvertiere numerische Spalten
+        numeric_columns = ['open', 'high', 'low', 'close', 'volume', 'quote_asset_volume',
+                         'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume']
+        
+        for col in numeric_columns:
+            # Sichere Konvertierung mit expliziter Fehlerbehandlung
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                # Ersetze NaN-Werte durch 0, um None-Vergleiche zu vermeiden
+                df[col].fillna(0, inplace=True)
+        
+        # Konvertiere Zeitstempel
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        
+        # Setze Zeitstempel als Index
+        df.set_index('timestamp', inplace=True)
+        
+        # Speichere Daten lokal
+        try:
+            df.to_csv(cache_file)
+            logger.info(f"Daten in {cache_file} gespeichert")
+        except Exception as e:
+            logger.error(f"Fehler beim Speichern der Daten: {e}")
+        
+        return df
+    
+    def _get_interval_ms(self, interval: str) -> int:
+        """Konvertiert ein Zeitintervall in Millisekunden.
+        
+        Args:
+            interval: Zeitintervall als String (z.B. "1h", "4h", "1d")
+            
+        Returns:
+            Intervall in Millisekunden
+        """
+        # Standardwert, falls die Konvertierung fehlschlägt
+        default_ms = 24 * 60 * 60 * 1000  # 1 Tag in ms
+        
+        if not interval or not isinstance(interval, str):
+            logger.warning(f"Ungültiges Intervall: {interval}, verwende Standardwert (1d)")
+            return default_ms
+        
+        # Extrahiere Zahl und Einheit
+        try:
+            amount = int(''.join(filter(str.isdigit, interval)) or 1)
+            unit = ''.join(filter(str.isalpha, interval)).lower()
+            
+            # Konvertiere Einheit in Millisekunden
+            if unit == 'm':  # Minute
+                return amount * 60 * 1000
+            elif unit == 'h':  # Stunde
+                return amount * 60 * 60 * 1000
+            elif unit == 'd':  # Tag
+                return amount * 24 * 60 * 60 * 1000
+            elif unit == 'w':  # Woche
+                return amount * 7 * 24 * 60 * 60 * 1000
+            elif unit == 'M':  # Monat (approximiert)
+                return amount * 30 * 24 * 60 * 60 * 1000
+            else:
+                logger.warning(f"Unbekannte Zeiteinheit: {unit}, verwende Standardwert (1d)")
+                return default_ms
+        except Exception as e:
+            logger.error(f"Fehler bei der Intervallkonvertierung: {e}")
+            return default_ms
+    
     def _handle_api_error(self, e: Exception, retry_count: int = 0) -> bool:
         """Behandelt API-Fehler und wechselt ggf. die Base-URL.
 

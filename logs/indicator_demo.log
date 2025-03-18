@@ -7,3 +7,37 @@
 2025-03-17 18:10:04 - trading_bot - ERROR - Fehler beim Laden der historischen Daten: APIError(code=-1100): Illegal characters found in parameter 'symbol'; legal range is '^[A-Z0-9-_.]{1,20}$'.
 2025-03-17 18:10:04 - trading_bot - ERROR - Keine Daten gefunden. Bitte überprüfe das Symbol und Intervall.
 2025-03-17 18:10:08 - trading_bot - INFO - Verbindung zum Binance Testnet hergestellt
+2025-03-18 07:24:41 - trading_bot - INFO - Verbindung zum Binance Mainnet hergestellt
+2025-03-18 07:25:07 - trading_bot - INFO - 1000 Datenpunkte für BTCUSDT mit Intervall 1m geladen
+2025-03-18 07:25:07 - trading_bot - INFO - Technische Indikatoren initialisiert
+2025-03-18 07:25:08 - trading_bot - INFO - Alle technischen Indikatoren hinzugefügt, 980 gültige Datenpunkte
+2025-03-18 07:25:12 - trading_bot - INFO - Daten in output/BTCUSDT_1m_20250318_072512.csv gespeichert
+2025-03-18 07:26:03 - trading_bot - INFO - Verbindung zum Binance Mainnet hergestellt
+2025-03-18 07:26:21 - trading_bot - INFO - 1000 Datenpunkte für DOGEUSDT mit Intervall 1m geladen
+2025-03-18 07:26:21 - trading_bot - INFO - Technische Indikatoren initialisiert
+2025-03-18 07:26:21 - trading_bot - INFO - Alle technischen Indikatoren hinzugefügt, 980 gültige Datenpunkte
+2025-03-18 07:26:25 - trading_bot - INFO - Daten in output/DOGEUSDT_1m_20250318_072625.csv gespeichert
+2025-03-18 07:27:29 - trading_bot - INFO - Verbindung zum Binance Mainnet hergestellt
+2025-03-18 07:27:46 - trading_bot - INFO - 1000 Datenpunkte für DOGEUSDT mit Intervall 5m geladen
+2025-03-18 07:27:46 - trading_bot - INFO - Technische Indikatoren initialisiert
+2025-03-18 07:27:47 - trading_bot - INFO - Alle technischen Indikatoren hinzugefügt, 980 gültige Datenpunkte
+2025-03-18 07:27:50 - trading_bot - INFO - Daten in output/DOGEUSDT_5m_20250318_072750.csv gespeichert
+2025-03-18 07:29:00 - trading_bot - INFO - Verbindung zum Binance Mainnet hergestellt
+2025-03-18 07:29:16 - trading_bot - INFO - 19 Datenpunkte für REDUSDT mit Intervall 1d geladen
+2025-03-18 07:29:16 - trading_bot - INFO - Technische Indikatoren initialisiert
+2025-03-18 07:29:16 - trading_bot - WARNING - SMA-short konnte nicht berechnet werden
+2025-03-18 07:29:16 - trading_bot - WARNING - SMA-medium konnte nicht berechnet werden
+2025-03-18 07:29:16 - trading_bot - WARNING - SMA-long konnte nicht berechnet werden
+2025-03-18 07:29:16 - trading_bot - WARNING - EMA-medium konnte nicht berechnet werden, verwende SMA
+2025-03-18 07:29:16 - trading_bot - ERROR - Fehler bei EMA-medium Berechnung: 'NoneType' object has no attribute 'fillna'
+2025-03-18 07:29:16 - trading_bot - WARNING - EMA-long konnte nicht berechnet werden, verwende SMA
+2025-03-18 07:29:16 - trading_bot - ERROR - Fehler bei EMA-long Berechnung: 'NoneType' object has no attribute 'fillna'
+2025-03-18 07:29:16 - trading_bot - WARNING - Zu wenig Datenpunkte für EMA-Berechnung: 19 < 26
+2025-03-18 07:29:16 - trading_bot - WARNING - Zu wenig Datenpunkte für Bollinger Bands: 19 < 20
+2025-03-18 07:29:16 - trading_bot - INFO - Alle technischen Indikatoren hinzugefügt, 0 gültige Datenpunkte
+2025-03-18 07:29:18 - trading_bot - INFO - Daten in output/REDUSDT_1d_20250318_072918.csv gespeichert
+2025-03-18 07:39:00 - trading_bot - INFO - Verbindung zum Binance Mainnet hergestellt
+2025-03-18 07:39:22 - trading_bot - INFO - 1000 Datenpunkte für ETHUSDT mit Intervall 5m geladen
+2025-03-18 07:39:22 - trading_bot - INFO - Technische Indikatoren initialisiert
+2025-03-18 07:39:22 - trading_bot - INFO - Alle technischen Indikatoren hinzugefügt, 980 gültige Datenpunkte
+2025-03-18 07:39:26 - trading_bot - INFO - Daten in output/ETHUSDT_5m_20250318_073926.csv gespeichert

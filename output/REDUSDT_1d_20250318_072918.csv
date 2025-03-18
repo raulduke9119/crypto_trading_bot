@@ -1,0 +1,1 @@
+timestamp,open,high,low,close,volume,close_time,quote_asset_volume,number_of_trades,taker_buy_base_asset_volume,taker_buy_quote_asset_volume,ignore,ema_short,rsi,rsi_overbought,rsi_oversold,rsi_momentum,atr,atr_pct,atr_increasing,atr_high,stoch_k,stoch_d,stoch_overbought,stoch_oversold,stoch_cross_up,stoch_cross_down,obv,volume_sma,volume_ratio,returns,volatility,tr_pct

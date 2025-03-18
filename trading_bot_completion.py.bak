@@ -13,10 +13,8 @@ from binance.exceptions import BinanceAPIException
 from binance.enums import *
 
 # Die folgenden Methoden müssen in die TradingBot-Klasse in trading_bot.py integriert werden:
-
-"""
 def rank_trading_opportunities(self, market_data: Dict[str, pd.DataFrame]) -> List[Tuple[str, int, float]]:
-    \"\"\"
+    """
     Rankt potenzielle Handelsmöglichkeiten basierend auf Signalen und Stärke.
     
     Args:
@@ -24,7 +22,7 @@ def rank_trading_opportunities(self, market_data: Dict[str, pd.DataFrame]) -> Li
         
     Returns:
         Liste von (Symbol, Signal, Stärke)-Tupeln, sortiert nach Stärke
-    \"\"\"
+    """
     try:
         opportunities = []
         

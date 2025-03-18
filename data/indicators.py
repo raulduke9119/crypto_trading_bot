@@ -311,31 +311,72 @@ class TechnicalIndicators:
             DataFrame mit hinzugefügten Bollinger Bands
         """
         try:
-            # Bollinger Bands mit pandas_ta berechnen
-            bbands = pta.bbands(
-                df['close'], 
-                length=self.config['BBANDS']['period'],
-                std=self.config['BBANDS']['std_dev']
+            # Validiere Eingabedaten
+            if df.empty:
+                logger.warning("DataFrame ist leer, überspringe Bollinger Bands")
+                return df
+            
+            if 'close' not in df.columns:
+                logger.error("'close' Spalte nicht im DataFrame gefunden")
+                return df
+            
+            # Stelle sicher, dass Close keine None-Werte enthält
+            close_series = df['close'].copy()
+            if close_series.isnull().any():
+                logger.warning("Null-Werte in close-Daten gefunden, führe Bereinigung durch")
+                close_series = close_series.ffill().bfill()
+            
+            # Konfigurationswerte mit Fehlerbehandlung
+            bbands_config = self.config.get('BBANDS', {'period': 20, 'std_dev': 2.0})
+            period = bbands_config.get('period', 20)
+            std_dev = bbands_config.get('std_dev', 2.0)
+            
+            # Prüfe, ob genügend Datenpunkte vorhanden sind
+            if len(close_series) < period:
+                logger.warning(f"Zu wenig Datenpunkte für Bollinger Bands: {len(close_series)} < {period}")
+                return df
+            
+            # Berechne Bollinger Bands manuell, um mehr Kontrolle zu haben
+            sma = close_series.rolling(window=period).mean()
+            std = close_series.rolling(window=period).std()
+            
+            # Füge Bollinger Bands zum DataFrame hinzu
+            df['bb_upper'] = sma + (std * std_dev)
+            df['bb_middle'] = sma
+            df['bb_lower'] = sma - (std * std_dev)
+            
+            # Berechne Bollinger Band Width und %B mit Null-Wert-Prüfung
+            df['bb_width'] = df.apply(
+                lambda row: (row['bb_upper'] - row['bb_lower']) / row['bb_middle'] 
+                if pd.notnull(row['bb_middle']) and row['bb_middle'] != 0 else 0, 
+                axis=1
             )
             
-            # Bollinger Bands-Spalten extrahieren und zum Haupt-DataFrame hinzufügen
-            df['bb_upper'] = bbands['BBU_' + str(self.config['BBANDS']['period']) + '_' + str(self.config['BBANDS']['std_dev'])]
-            df['bb_middle'] = bbands['BBM_' + str(self.config['BBANDS']['period']) + '_' + str(self.config['BBANDS']['std_dev'])]
-            df['bb_lower'] = bbands['BBL_' + str(self.config['BBANDS']['period']) + '_' + str(self.config['BBANDS']['std_dev'])]
-            
-            # Berechne Bollinger Band Width und %B
-            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
-            # Prüfe, ob bb_upper und bb_lower identisch sind (Division durch Null vermeiden)
+            # Berechne %B mit sicherer Division
             df['bb_pct_b'] = df.apply(
                 lambda row: (row['close'] - row['bb_lower']) / (row['bb_upper'] - row['bb_lower']) 
-                if row['bb_upper'] != row['bb_lower'] else 0.5, axis=1
+                if pd.notnull(row['bb_upper']) and pd.notnull(row['bb_lower']) and row['bb_upper'] != row['bb_lower'] 
+                else 0.5, 
+                axis=1
             )
+            
+            # Füge Bollinger Band Signale hinzu
+            df['bb_upper_cross'] = (df['close'] > df['bb_upper']) & (df['close'].shift(1) <= df['bb_upper'].shift(1))
+            df['bb_lower_cross'] = (df['close'] < df['bb_lower']) & (df['close'].shift(1) >= df['bb_lower'].shift(1))
+            
+            # Fülle verbleibende NaN-Werte
+            bb_columns = ['bb_upper', 'bb_middle', 'bb_lower', 'bb_width', 'bb_pct_b']
+            df[bb_columns] = df[bb_columns].fillna(method='ffill').fillna(method='bfill').fillna(0)
             
             logger.debug("Bollinger Bands hinzugefügt")
             return df
             
         except Exception as e:
             logger.error(f"Fehler beim Berechnen der Bollinger Bands: {e}")
+            # Stelle sicher, dass alle BB-Spalten existieren
+            for col in ['bb_upper', 'bb_middle', 'bb_lower', 'bb_width', 'bb_pct_b', 'bb_upper_cross', 'bb_lower_cross']:
+                if col not in df.columns:
+                    df[col] = 0
             return df
     
     def add_atr(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -349,22 +390,74 @@ class TechnicalIndicators:
             DataFrame mit hinzugefügtem ATR
         """
         try:
-            # ATR mit pandas_ta berechnen
-            df['atr'] = pta.atr(
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                length=self.config['ATR']['period']
+            # Validiere Eingabedaten
+            if df.empty:
+                logger.warning("DataFrame ist leer, überspringe ATR-Berechnung")
+                return df
+            
+            required_columns = ['high', 'low', 'close']
+            for col in required_columns:
+                if col not in df.columns:
+                    logger.error(f"'{col}' Spalte nicht im DataFrame gefunden")
+                    return df
+            
+            # Stelle sicher, dass keine None-Werte in den Eingabedaten sind
+            for col in required_columns:
+                if df[col].isnull().any():
+                    logger.warning(f"Null-Werte in {col}-Daten gefunden, führe Bereinigung durch")
+                    df[col] = df[col].ffill().bfill()
+            
+            # Konfigurationswerte mit Fehlerbehandlung
+            atr_config = self.config.get('ATR', {'period': 14})
+            period = atr_config.get('period', 14)
+            
+            # Prüfe, ob genügend Datenpunkte vorhanden sind
+            if len(df) < period:
+                logger.warning(f"Zu wenig Datenpunkte für ATR: {len(df)} < {period}")
+                return df
+            
+            # Berechne True Range manuell
+            high = df['high']
+            low = df['low']
+            close = df['close']
+            prev_close = close.shift(1)
+            
+            # Berechne die drei Komponenten des True Range
+            tr1 = high - low
+            tr2 = (high - prev_close).abs()
+            tr3 = (low - prev_close).abs()
+            
+            # True Range ist das Maximum der drei Komponenten
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            
+            # Berechne ATR als gleitenden Durchschnitt des True Range
+            df['atr'] = tr.rolling(window=period).mean()
+            
+            # Berechne ATR in Prozent des Preises mit Null-Wert-Prüfung
+            df['atr_pct'] = df.apply(
+                lambda row: (row['atr'] / row['close'] * 100) 
+                if pd.notnull(row['atr']) and pd.notnull(row['close']) and row['close'] != 0 
+                else 0, 
+                axis=1
             )
             
-            # Berechne ATR in Prozent des Preises
-            df['atr_pct'] = df['atr'] / df['close'] * 100
+            # Füge ATR-basierte Signale hinzu
+            df['atr_increasing'] = df['atr'].diff() > 0
+            df['atr_high'] = df['atr_pct'] > df['atr_pct'].rolling(window=period).mean()
+            
+            # Fülle verbleibende NaN-Werte
+            atr_columns = ['atr', 'atr_pct', 'atr_increasing', 'atr_high']
+            df[atr_columns] = df[atr_columns].fillna(method='ffill').fillna(method='bfill').fillna(0)
             
             logger.debug("ATR hinzugefügt")
             return df
             
         except Exception as e:
             logger.error(f"Fehler beim Berechnen des ATR: {e}")
+            # Stelle sicher, dass alle ATR-Spalten existieren
+            for col in ['atr', 'atr_pct', 'atr_increasing', 'atr_high']:
+                if col not in df.columns:
+                    df[col] = 0
             return df
     
     def add_stochastic(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -378,37 +471,91 @@ class TechnicalIndicators:
             DataFrame mit hinzugefügtem Stochastic Oscillator
         """
         try:
-            # Stochastic mit pandas_ta berechnen
-            stoch = pta.stoch(
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                k=self.config['STOCH']['k_period'],
-                d=self.config['STOCH']['d_period'],
-                smooth_k=self.config['STOCH']['slowing']
+            # Validiere Eingabedaten
+            if df.empty:
+                logger.warning("DataFrame ist leer, überspringe Stochastic-Berechnung")
+                return df
+            
+            required_columns = ['high', 'low', 'close']
+            for col in required_columns:
+                if col not in df.columns:
+                    logger.error(f"'{col}' Spalte nicht im DataFrame gefunden")
+                    return df
+            
+            # Stelle sicher, dass keine None-Werte in den Eingabedaten sind
+            for col in required_columns:
+                if df[col].isnull().any():
+                    logger.warning(f"Null-Werte in {col}-Daten gefunden, führe Bereinigung durch")
+                    df[col] = df[col].ffill().bfill()
+            
+            # Konfigurationswerte mit Fehlerbehandlung
+            stoch_config = self.config.get('STOCH', {'k_period': 14, 'd_period': 3, 'slowing': 3})
+            k_period = stoch_config.get('k_period', 14)
+            d_period = stoch_config.get('d_period', 3)
+            slowing = stoch_config.get('slowing', 3)
+            overbought = stoch_config.get('overbought', 80)
+            oversold = stoch_config.get('oversold', 20)
+            
+            # Prüfe, ob genügend Datenpunkte vorhanden sind
+            if len(df) < k_period:
+                logger.warning(f"Zu wenig Datenpunkte für Stochastic: {len(df)} < {k_period}")
+                return df
+            
+            # Berechne Stochastic Oscillator manuell
+            # Berechne %K
+            low_min = df['low'].rolling(window=k_period).min()
+            high_max = df['high'].rolling(window=k_period).max()
+            
+            # Sichere Division mit Null-Wert-Prüfung
+            k_raw = df.apply(
+                lambda row: 100 * (row['close'] - low_min[row.name]) / (high_max[row.name] - low_min[row.name]) 
+                if pd.notnull(high_max[row.name]) and pd.notnull(low_min[row.name]) and (high_max[row.name] - low_min[row.name]) != 0 
+                else 50, 
+                axis=1
             )
             
-            # Extrahiere die K- und D-Linien
-            k_name = f"STOCHk_{self.config['STOCH']['k_period']}_{self.config['STOCH']['d_period']}_{self.config['STOCH']['slowing']}"
-            d_name = f"STOCHd_{self.config['STOCH']['k_period']}_{self.config['STOCH']['d_period']}_{self.config['STOCH']['slowing']}"
+            # Berechne %K mit Glättung
+            k = k_raw.rolling(window=slowing).mean() if slowing > 1 else k_raw
             
-            if k_name in stoch.columns and d_name in stoch.columns:
-                df['stoch_k'] = stoch[k_name]
-                df['stoch_d'] = stoch[d_name]
-            else:
-                # Fallback für den Fall, dass die Spaltennamen anders sind
-                df['stoch_k'] = stoch.iloc[:, 0]
-                df['stoch_d'] = stoch.iloc[:, 1]
+            # Berechne %D (Signal-Linie)
+            d = k.rolling(window=d_period).mean()
             
-            # Füge Stochastic-Signale hinzu
-            df['stoch_cross_up'] = (df['stoch_k'] > df['stoch_d']) & (df['stoch_k'].shift(1) <= df['stoch_d'].shift(1))
-            df['stoch_cross_down'] = (df['stoch_k'] < df['stoch_d']) & (df['stoch_k'].shift(1) >= df['stoch_d'].shift(1))
+            # Füge zum DataFrame hinzu
+            df['stoch_k'] = k
+            df['stoch_d'] = d
+            
+            # Füge Stochastic-Signale hinzu mit Null-Wert-Prüfung
+            df['stoch_overbought'] = df['stoch_k'] > overbought
+            df['stoch_oversold'] = df['stoch_k'] < oversold
+            
+            # Berechne Kreuzungen mit sicherer Null-Wert-Behandlung
+            k_shift = df['stoch_k'].shift(1).fillna(50)
+            d_shift = df['stoch_d'].shift(1).fillna(50)
+            
+            df['stoch_cross_up'] = (df['stoch_k'] > df['stoch_d']) & (k_shift <= d_shift)
+            df['stoch_cross_down'] = (df['stoch_k'] < df['stoch_d']) & (k_shift >= d_shift)
+            
+            # Fülle verbleibende NaN-Werte
+            stoch_columns = ['stoch_k', 'stoch_d', 'stoch_overbought', 'stoch_oversold', 'stoch_cross_up', 'stoch_cross_down']
+            for col in stoch_columns:
+                if col in df.columns:
+                    if col in ['stoch_k', 'stoch_d']:
+                        df[col] = df[col].fillna(method='ffill').fillna(method='bfill').fillna(50)
+                    elif col in ['stoch_overbought', 'stoch_oversold', 'stoch_cross_up', 'stoch_cross_down']:
+                        df[col] = df[col].fillna(False)
             
             logger.debug("Stochastic Oscillator hinzugefügt")
             return df
             
         except Exception as e:
             logger.error(f"Fehler beim Berechnen des Stochastic Oscillator: {e}")
+            # Stelle sicher, dass alle Stochastic-Spalten existieren
+            for col in ['stoch_k', 'stoch_d', 'stoch_overbought', 'stoch_oversold', 'stoch_cross_up', 'stoch_cross_down']:
+                if col not in df.columns:
+                    if col in ['stoch_k', 'stoch_d']:
+                        df[col] = 50
+                    else:
+                        df[col] = False
             return df
     
     def add_volume_indicators(self, df: pd.DataFrame) -> pd.DataFrame:

@@ -96,7 +96,18 @@ def plot_indicators(df, symbol, interval):
         symbol: Handelspaar-Symbol
         interval: Zeitintervall
     """
-    plt.style.use('seaborn-darkgrid')
+    # Aktualisierte Stilanpassung für neuere Matplotlib-Versionen
+    try:
+        # Versuche zuerst den aktuellen Stil zu setzen
+        import seaborn as sns
+        sns.set_style('darkgrid')
+    except (ImportError, AttributeError):
+        # Fallback für ältere Versionen
+        try:
+            plt.style.use('seaborn-v0_8-darkgrid')
+        except:
+            # Allgemeiner Fallback
+            plt.style.use('default')
     
     # Erstelle Subplots
     fig, axes = plt.subplots(4, 1, figsize=(12, 16), sharex=True, gridspec_kw={'height_ratios': [3, 1, 1, 1]})

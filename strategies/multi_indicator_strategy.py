@@ -64,8 +64,8 @@ class MultiIndicatorStrategy(BaseStrategy):
     
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Generiert Kauf-/Verkaufssignale basierend auf mehreren technischen Indikatoren.
-        Implementiert eine profitable Kombination aus kurzen RSI, MACD-Histogramm und Bollinger Bands.
+        Generiert Kauf-/Verkaufssignale für hochfrequenten Handel mit kleinen Gewinnen.
+        Implementiert deterministische Muster und Scalping-Strategien für häufige Trades.
         
         Args:
             df: DataFrame mit Preis- und Indikatordaten
@@ -81,135 +81,510 @@ class MultiIndicatorStrategy(BaseStrategy):
             data['signal'] = 0  # 1 für Kauf, -1 für Verkauf, 0 für Halten
             data['signal_strength'] = 0  # Signalstärke von 0 bis 100
             
-            # ======= Optimierte Strategie-Logik basierend auf Backtesting-Recherche =======
+            # ======= Hoch-Frequenz Scalping-Strategie für kleine, häufige Trades =======
             
-            # 1. Kurzfristiger RSI (2-Perioden) für schnelle Mean-Reversion
-            # 2. MACD-Histogramm für Trendbestätigung mit 4-Tages-Abfall
-            # 3. Bollinger-Band-Ausbrüche als primäre Kauf-/Verkaufssignale
-            # 4. Volumenbestätigung für alle Signale
-            # 5. Überdurchschnittliches Volumen als Signalverstärker
+            # 1. Ultraschneller RSI (1-2 Perioden) für sofortige Umkehrsignale
+            # 2. Mikroausbrüche aus kurzfristigen Price Channels
+            # 3. Hochfrequenz-Bollinger-Band-Touches für Mean-Reversion
+            # 4. Kurzzeitiges Momentum für schnelle Ein- und Ausstiege
+            # 5. Deterministische Muster bei Kerzenumschwüngen
             
             # Validiere erforderliche Spalten und setze sichere Standardwerte ein
             required_columns = ['macd_hist', 'rsi', 'close', 'sma_medium', 'stoch_k', 
-                              'stoch_d', 'bb_upper', 'bb_lower', 'bb_middle', 'volume', 'ema_short']
+                              'stoch_d', 'bb_upper', 'bb_lower', 'bb_middle', 'volume', 'ema_short', 'high', 'low']
             
             # Sicherstellen, dass alle erforderlichen Spalten existieren
-            for col in required_columns:
-                if col not in data.columns:
-                    logger.error(f"Erforderliche Spalte {col} nicht gefunden")
+            missing_columns = [col for col in required_columns if col not in data.columns]
+            if missing_columns:
+                # Wenn high/low fehlen, aber close vorhanden ist, diese aus close erzeugen
+                if 'close' in data.columns:
+                    if 'high' in missing_columns:
+                        data['high'] = data['close']
+                    if 'low' in missing_columns:
+                        data['low'] = data['close']
+                    missing_columns = [col for col in missing_columns if col not in ['high', 'low']]
+                
+                if missing_columns:
+                    logger.error(f"Erforderliche Spalten fehlen: {missing_columns}")
                     return df
             
             # Sichere Behandlung von None/NaN-Werten für alle kritischen Berechnungen
-            for col in required_columns:
+            for col in [c for c in required_columns if c in data.columns]:
                 if data[col].isnull().any():
-                    logger.warning(f"Null-Werte in {col} gefunden, führe Bereinigung durch")
-                    # Verwende explizite Methoden statt method=ffill wegen FutureWarning
-                    data[col] = data[col].ffill().bfill()
+                    # Der Benutzer möchte die Warnungen ignorieren, also verwenden wir fillna mit method
+                    data[col] = data[col].fillna(method='ffill').fillna(method='bfill').fillna(0)
                     
-            # Berechne kurzfristigen RSI (2-Perioden) für schnellere Mean-Reversion-Signale
-            # Basierend auf Forschungsergebnissen arbeitet 2-Perioden RSI besser für kurzfristige Signale
-            if 'close' in data.columns:
-                try:
+            # ======= HOCHFREQUENZ-INDIKATOREN FÜR SCALPING =======
+            
+            # 1. Ultraschneller RSI (1-Periode) für sofortige Marktumkehrungen
+            try:
+                # Berechne EMA-basierten RSI mit sehr kurzer Periode (1) für maximale Empfindlichkeit
+                delta = data['close'].diff()
+                gain = delta.where(delta > 0, 0)
+                loss = -delta.where(delta < 0, 0)
+                
+                # Verwende EMA für noch schnellere Reaktion
+                alpha = 0.5  # Hoher Alpha-Wert für schnellere Reaktion
+                avg_gain = gain.ewm(alpha=alpha).mean()
+                avg_loss = loss.ewm(alpha=alpha).mean()
+                
+                rs = avg_gain / avg_loss.replace(0, 1e-10)  # Vermeidet Division durch Null
+                data['rsi_ultra'] = 100 - (100 / (1 + rs))
+                
+                # Berechne auch 2-Perioden RSI als Backup-Indikator
+                avg_gain2 = gain.rolling(window=2).mean()
+                avg_loss2 = loss.rolling(window=2).mean()
+                rs2 = avg_gain2 / avg_loss2.replace(0, 1e-10)
+                data['rsi_short'] = 100 - (100 / (1 + rs2))
+                
+                # RSI Divergence (Preisdivergenz) - wichtiger technischer Indikator
+                price_higher = data['close'] > data['close'].shift(1)
+                rsi_lower = data['rsi_ultra'] < data['rsi_ultra'].shift(1)
+                bearish_divergence = price_higher & rsi_lower
+                
+                price_lower = data['close'] < data['close'].shift(1)
+                rsi_higher = data['rsi_ultra'] > data['rsi_ultra'].shift(1)
+                bullish_divergence = price_lower & rsi_higher
+                
+            except Exception as e:
+                logger.error(f"Fehler bei Ultraschnell-RSI-Berechnung: {e}")
+                data['rsi_ultra'] = data['rsi']
+                data['rsi_short'] = data['rsi']
+                bearish_divergence = pd.Series(False, index=data.index)
+                bullish_divergence = pd.Series(False, index=data.index)
+            
+            # ======= DETERMINISTISCHE HANDELSMUSTER FÜR MICRO-SCALPING =======
+            try:
+                # === 2. KURZFRISTIGE PREISKANÄLE FÜR MIKROAUSBRÜCHE ===
+                # Erstelle sehr enge Preiskanäle für Mikroausbrüche (3-5 Perioden)
+                data['micro_highest_3'] = data['high'].rolling(window=3).max()
+                data['micro_lowest_3'] = data['low'].rolling(window=3).min()
+                data['micro_highest_5'] = data['high'].rolling(window=5).max()
+                data['micro_lowest_5'] = data['low'].rolling(window=5).min()
+                
+                # Micro-Breakouts (sehr kurzfristige Ausbrüche für häufige Signals)
+                micro_breakout_up = data['close'] > data['micro_highest_3'].shift(1)
+                micro_breakout_down = data['close'] < data['micro_lowest_3'].shift(1)
+                
+                # Micro-Bounces (Abpraller an den Kanalgrenzwerten)
+                micro_bounce_up = (data['low'] <= data['micro_lowest_5'].shift(1)) & \
+                                  (data['close'] > data['low'] * 1.001)  # Mindestens 0,1% Abprall
+                micro_bounce_down = (data['high'] >= data['micro_highest_5'].shift(1)) & \
+                                    (data['close'] < data['high'] * 0.999)  # Mindestens 0,1% Abprall
+                
+                # === 3. MICRO-BOLLINGER-BAND EVENTS ===
+                # Bollinger Band Touch Events (keine vollständigen Ausbrüche nötig)
+                # Verwende kürzere Bollinger Perioden (10 statt 20) für mehr Signale
+                if 'bb_upper' in data.columns and 'bb_lower' in data.columns:
+                    # BB-Touch statt Ausbruch (genauere Einstiege)
+                    bb_touch_upper = (data['high'] >= data['bb_upper'] * 0.998) & \
+                                      (data['close'] < data['bb_upper'] * 0.995)  # Touch und Rückzug
+                    bb_touch_lower = (data['low'] <= data['bb_lower'] * 1.002) & \
+                                      (data['close'] > data['bb_lower'] * 1.005)  # Touch und Abprall
+                    
+                    # Berechne engere Bollinger Bänder für noch mehr Signale
+                    data['bb_middle_10'] = data['close'].rolling(window=10).mean()
+                    data['bb_std_10'] = data['close'].rolling(window=10).std()
+                    data['bb_upper_10'] = data['bb_middle_10'] + 1.5 * data['bb_std_10']
+                    data['bb_lower_10'] = data['bb_middle_10'] - 1.5 * data['bb_std_10']
+                    
+                    # Ultra-kurzfristige BB-Berührungen
+                    bb_touch_upper_10 = (data['high'] >= data['bb_upper_10']) & \
+                                         (data['close'] < data['bb_upper_10'])
+                    bb_touch_lower_10 = (data['low'] <= data['bb_lower_10']) & \
+                                         (data['close'] > data['bb_lower_10'])
+                else:
+                    bb_touch_upper = pd.Series(False, index=data.index)
+                    bb_touch_lower = pd.Series(False, index=data.index)
+                    bb_touch_upper_10 = pd.Series(False, index=data.index)
+                    bb_touch_lower_10 = pd.Series(False, index=data.index)
+                
+                # === 4. KURZZEITIGES MOMENTUM FÜR SCHNELLE TRADES ===
+                # Berechne Micro-Momentum (2-Perioden)
+                close_diff_pct = data['close'].pct_change()
+                data['momentum_2'] = close_diff_pct + close_diff_pct.shift(1)
+                strong_momentum_up = data['momentum_2'] > 0.005  # >0.5% in 2 Perioden
+                strong_momentum_down = data['momentum_2'] < -0.005  # <-0.5% in 2 Perioden
+                
+                # Momentum-Umkehr (Umkehr nach starkem Move)
+                momentum_reversal_up = (close_diff_pct.shift(1) < -0.003) & (close_diff_pct > 0)
+                momentum_reversal_down = (close_diff_pct.shift(1) > 0.003) & (close_diff_pct < 0)
+                
+                # === 5. KERZENMUSTER-ERKENNUNG ===
+                # Erkennung von Hammer/Shooting Stars für Umkehrsignale
+                body_size = abs(data['close'] - data['open']) if 'open' in data.columns else \
+                            abs(data['close'] - data['close'].shift(1)) * 0.5
+                
+                upper_wick = data['high'] - np.maximum(data['close'], data['open'] if 'open' in data.columns \
+                                                    else data['close'])
+                lower_wick = np.minimum(data['close'], data['open'] if 'open' in data.columns \
+                                       else data['close']) - data['low']
+                
+                # Hammer-Muster (Bullish)
+                hammer = (lower_wick > (body_size * 2)) & (upper_wick < (body_size * 0.5))
+                
+                # Shooting Star-Muster (Bearish)
+                shooting_star = (upper_wick > (body_size * 2)) & (lower_wick < (body_size * 0.5))
+                
+                # === 6. ERWEITERTE VOLUMENANALYSE FÜR HOCHFREQUENZHANDEL ===
+                if 'volume' in data.columns:
+                    try:
+                        # Mehrere Zeitfenster für Volumen-Analyse (für unterschiedliche Trading-Horizonte)
+                        data['volume_sma_3'] = data['volume'].rolling(window=3).mean()  # Ultra-kurzfristig
+                        data['volume_sma_5'] = data['volume'].rolling(window=5).mean()  # Kurzfristig
+                        data['volume_sma_10'] = data['volume'].rolling(window=10).mean()  # Mittelfristig
+                        
+                        # Verschiedene Volumen-Verhältnisse berechnen
+                        data['volume_ratio_3'] = data['volume'] / data['volume_sma_3'].replace(0, 0.001)  # Verhältnis zum ultraschnellen Durchschnitt
+                        data['volume_ratio_5'] = data['volume'] / data['volume_sma_5'].replace(0, 0.001)  # Verhältnis zum kurzfristigen Durchschnitt
+                        data['volume_ratio_10'] = data['volume'] / data['volume_sma_10'].replace(0, 0.001)  # Verhältnis zum mittelfristigen Durchschnitt
+                        
+                        # 1. Erweiterte Volumen-Spike-Erkennung für 5m HF-Trading (basierend auf Perplexity-Empfehlungen)
+                        extreme_volume_spike = data['volume_ratio_5'] > 1.7  # Extremer Anstieg (erhöht von 1.6)
+                        sudden_volume_spike = data['volume_ratio_5'] > 1.4  # Starker Anstieg (erhöht von 1.3)
+                        moderate_volume_increase = data['volume_ratio_5'] > 1.2  # Moderater Anstieg (erhöht von 1.1)
+                        
+                        # 2. Volumentrend-Analyse für 5m HF-Trading (optimiert nach Perplexity-Empfehlungen)
+                        volume_increasing = data['volume'] > data['volume'].shift(1) * 1.12  # 12% Anstieg zum Vortag (erhöht von 8%)
+                        volume_trend_up = (data['volume'] > data['volume'].shift(1)) & \
+                                         (data['volume'].shift(1) > data['volume'].shift(2))  # Anstieg über 2 Perioden
+                        
+                        # 3. Volumen-Preisbestätigung (kritisch für Signalqualität)
+                        vol_confirms_price_up = (data['close'] > data['close'].shift(1)) & \
+                                               (data['volume'] > data['volume_sma_5'])  # Preis steigt mit überdurchschnittlichem Volumen
+                        vol_confirms_price_down = (data['close'] < data['close'].shift(1)) & \
+                                                 (data['volume'] > data['volume_sma_5'])  # Preis fällt mit überdurchschnittlichem Volumen
+                        
+                        # 4. Volumen-Divergenz (fortgeschrittenes Signal)
+                        # Positive Divergenz (Kaufsignal): Preis fällt, aber Volumen steigt
+                        vol_positive_divergence = (data['close'] < data['close'].shift(1)) & \
+                                                 (data['volume'] > data['volume'].shift(1) * 1.4)  # Volumen 40% höher bei fallendem Preis
+                        
+                        # Negative Divergenz (Verkaufssignal): Preis steigt, aber Volumen fällt
+                        vol_negative_divergence = (data['close'] > data['close'].shift(1)) & \
+                                                 (data['volume'] < data['volume'].shift(1) * 0.7)  # Volumen 30% niedriger bei steigendem Preis
+                    except Exception as e:
+                        logger.error(f"Fehler bei der erweiterten Volumenanalyse: {e}")
+                        # Fallback zu einfachen Werten bei Fehler
+                        sudden_volume_spike = data['volume'] > data['volume'].rolling(window=5).mean() * 1.8
+                        volume_increasing = data['volume'] > data['volume'].shift(1) * 1.3
+                        
+                        # Standardwerte für neue Variablen
+                        extreme_volume_spike = pd.Series(False, index=data.index)
+                        moderate_volume_increase = pd.Series(False, index=data.index)
+                        volume_trend_up = pd.Series(False, index=data.index)
+                        vol_confirms_price_up = pd.Series(False, index=data.index) 
+                        vol_confirms_price_down = pd.Series(False, index=data.index)
+                        vol_positive_divergence = pd.Series(False, index=data.index)
+                        vol_negative_divergence = pd.Series(False, index=data.index)
+                else:
+                    # Wenn keine Volumendaten verfügbar sind
+                    sudden_volume_spike = pd.Series(False, index=data.index)
+                    volume_increasing = pd.Series(False, index=data.index)
+                    extreme_volume_spike = pd.Series(False, index=data.index)
+                    moderate_volume_increase = pd.Series(False, index=data.index)
+                    volume_trend_up = pd.Series(False, index=data.index)
+                    vol_confirms_price_up = pd.Series(False, index=data.index)
+                    vol_confirms_price_down = pd.Series(False, index=data.index)
+                    vol_positive_divergence = pd.Series(False, index=data.index)
+                    vol_negative_divergence = pd.Series(False, index=data.index)
+                
+                # === 7. STOCHASTIK FÜR MICRO-REVERSALS ===
+                # Kurzzeitorientierte Stochastik-Kreuze (schneller als traditionelle 14,3,3)
+                if 'stoch_k' in data.columns and 'stoch_d' in data.columns:
+                    # Stochastik-Kreuzung nach oben
+                    stoch_cross_up = (data['stoch_k'] > data['stoch_d']) & \
+                                     (data['stoch_k'].shift(1) <= data['stoch_d'].shift(1))
+                    
+                    # Stochastik-Kreuzung nach unten
+                    stoch_cross_down = (data['stoch_k'] < data['stoch_d']) & \
+                                       (data['stoch_k'].shift(1) >= data['stoch_d'].shift(1))
+                    
+                    # Überverkaufter/überkaufter Bereich mit Umkehr
+                    stoch_oversold_reversal = (data['stoch_k'].shift(1) < 20) & (data['stoch_k'] > data['stoch_k'].shift(1))
+                    stoch_overbought_reversal = (data['stoch_k'].shift(1) > 80) & (data['stoch_k'] < data['stoch_k'].shift(1))
+                else:
+                    stoch_cross_up = pd.Series(False, index=data.index)
+                    stoch_cross_down = pd.Series(False, index=data.index)
+                    stoch_oversold_reversal = pd.Series(False, index=data.index)
+                    stoch_overbought_reversal = pd.Series(False, index=data.index)            
+            except Exception as e:
+                logger.error(f"Fehler bei der Berechnung der Scalping-Indikatoren: {e}")
+                return df
+                
+            # ======= SIGNALBERECHNUNG FÜR HOCHFREQUENZ-STRATEGIE =======
+            try:
+                # Prüfe, ob rsi_ultra bereits berechnet wurde, ansonsten berechne es jetzt
+                if 'rsi_ultra' not in data.columns:
+                    # Ultra-schneller RSI (2-Perioden) für schnelle Signale
+                    # Berechne direkt hier, ohne externe Funktion
                     delta = data['close'].diff()
                     gain = delta.where(delta > 0, 0)
                     loss = -delta.where(delta < 0, 0)
-                    avg_gain = gain.rolling(window=self.rsi_short_period).mean()
-                    avg_loss = loss.rolling(window=self.rsi_short_period).mean()
+                    
+                    # Für 2-Perioden RSI
+                    avg_gain = gain.rolling(window=2).mean()
+                    avg_loss = loss.rolling(window=2).mean()
                     rs = avg_gain / avg_loss.replace(0, 1e-10)  # Vermeidet Division durch Null
-                    data['rsi_short'] = 100 - (100 / (1 + rs))
-                except Exception as e:
-                    logger.error(f"Fehler bei RSI-Kurzberechnung: {e}")
-                    data['rsi_short'] = data['rsi']  # Fallback auf Standard-RSI
-            
-            # Berechne optimierte Kaufbedingungen basierend auf Backtesting-Ergebnissen
-            try:
-                # === Strategie 1: Kurzer RSI (2 Perioden) mit überverkauftem Zustand ===
-                # Research zeigt, dass 2-Perioden RSI bei Werten unter 15 starke Kaufsignale gibt
-                rsi_short_oversold = data['rsi_short'] < self.rsi_buy_threshold  # RSI(2) < 15
+                    data['rsi_ultra'] = 100 - (100 / (1 + rs))
                 
-                # === Strategie 2: MACD-Histogramm mit 4-Tage-Abfall + Umkehrung ===
-                # MACD-Histogramm muss 4 Tage in Folge gefallen sein und der 4. Tag unter Null
-                macd_hist_falling = True
-                for i in range(1, 5):
-                    if i < len(data) and i > 0:
-                        # Prüfe, ob das MACD-Histogramm in den letzten 4 Tagen gefallen ist
-                        if i < 4:
-                            macd_hist_falling &= data['macd_hist'].shift(i-1) < data['macd_hist'].shift(i)
-                        # Der 4. Tag muss unter Null sein
-                        elif i == 4:
-                            macd_hist_falling &= data['macd_hist'].shift(i-1) < 0
+                # Erstelle eine Kombination von Signalen für häufigere Trades                
+                # === 1. KAUFSIGNALE FÜR HOCHFREQUENZ-HANDEL (OPTIMIERT MIT VOLUMENFILTER) ===
+                buy_conditions = {
+                    # A. PRIMÄRE SIGNALE (HAUPTGEWICHT)
+                    
+                    # Ultra-RSI-Signale mit Volumenfilter (sehr empfindlich aber präzise)
+                    'rsi_ultra_oversold': (data['rsi_ultra'] < 20, 2.5),  # Gewichtung erhöht für starke Überverkauft-Signale
+                    'rsi_bounce': ((data['rsi_ultra'].shift(1) < 30) & 
+                                   (data['rsi_ultra'] > data['rsi_ultra'].shift(1)) & 
+                                   moderate_volume_increase, 2.0),  # Volumenfilter hinzugefügt
+                    
+                    # Divergenz mit Volumenfilter - fortgeschrittenes Pattern
+                    'bullish_divergence': (bullish_divergence & vol_confirms_price_up, 3.0),  # Nur mit Volumenfilter
+                    'vol_price_divergence_up': (vol_positive_divergence, 2.5),  # Neues Volumen-Divergenz-Signal
+                    
+                    # B. MIKRO-TREND-SIGNALE (MITTLERES GEWICHT)
+                    
+                    # Micro-Channel Signale mit Volumenfilter
+                    'micro_bounce_up': (micro_bounce_up & moderate_volume_increase, 2.0),  # Volumenfilter hinzugefügt
+                    'micro_breakout_up': (micro_breakout_up & (volume_increasing | extreme_volume_spike), 2.2),  # Stärkerer Volumenfilter
+                    
+                    # Bollinger-Band-Signale präzisiert durch Volumen
+                    'bb_touch_lower': (bb_touch_lower & volume_trend_up, 1.8),  # Volumentrend-Bestätigung
+                    'bb_touch_lower_10': (bb_touch_lower_10 & volume_trend_up, 1.5),  # Volumentrend-Bestätigung
+                    
+                    # Momentum-Signale mit Volumenfilter (höhere Qualität)
+                    'momentum_reversal_up': (momentum_reversal_up & vol_confirms_price_up, 2.0),  # Mit Volumenfilter
+                    'strong_momentum_up': (strong_momentum_up & extreme_volume_spike, 1.8) if 'strong_momentum_up' in locals() else (pd.Series(False, index=data.index), 1.8),
+                    
+                    # C. BESTÄTIGENDE SIGNALE (GERINGERES GEWICHT, ABER WICHTIG FÜR QUALITÄT)
+                    
+                    # Kerzenmuster mit Volumenfilter
+                    'hammer_pattern': (hammer & volume_increasing, 1.5),  # Volumenfilter hinzugefügt
+                    
+                    # Stochastik-Signale mit Volumenfilter
+                    'stoch_cross_up': (stoch_cross_up & moderate_volume_increase, 1.2),  # Volumenfilter hinzugefügt
+                    'stoch_oversold_reversal': (stoch_oversold_reversal & (volume_increasing | sudden_volume_spike), 1.7),  # Volumenfilter
+                    
+                    # Direkte Volumen-Signale (neuer Abschnitt)
+                    'extreme_volume_spike_up': (extreme_volume_spike & (data['close'] > data['close'].shift(1)), 1.8),  # Starker Volumenanstieg
+                    'volume_trend_acceleration_up': (volume_trend_up & (data['close'] > data['close'].shift(1)), 1.0)  # Bestätigter Volumentrend
+                }
                 
-                # Aktuelle Umkehr - MACD-Histogramm steigt wieder
-                macd_reversal = data['macd_hist'] > data['macd_hist'].shift(1)
-                macd_buy_signal = macd_hist_falling & macd_reversal
+                # === 2. VERKAUFSSIGNALE FÜR HOCHFREQUENZ-HANDEL (OPTIMIERT MIT VOLUMENFILTER) ===
+                sell_conditions: Dict[str, Tuple[pd.Series, float]] = {
+                    # A. PRIMÄRE SIGNALE (HAUPTGEWICHT)
+                    
+                    # Ultra-RSI-Signale mit Volumenfilter (sehr empfindlich aber präzise)
+                    'rsi_ultra_overbought': (data['rsi_ultra'] > 80, 2.5),  # Gewichtung erhöht für starke Überkauft-Signale
+                    'rsi_drop': ((data['rsi_ultra'].shift(1) > 70) & 
+                                (data['rsi_ultra'] < data['rsi_ultra'].shift(1)) & 
+                                moderate_volume_increase, 2.0),  # Volumenfilter hinzugefügt
+                    
+                    # Divergenz mit Volumenfilter - fortgeschrittenes Pattern
+                    'bearish_divergence': (bearish_divergence & vol_confirms_price_down, 3.0),  # Nur mit Volumenfilter
+                    'vol_price_divergence': (vol_negative_divergence, 2.5),  # Neues Volumen-Divergenz-Signal
+                    
+                    # B. MIKRO-TREND-SIGNALE (MITTLERES GEWICHT)
+                    
+                    # Micro-Channel Signale mit Volumenfilter
+                    'micro_bounce_down': (micro_bounce_down & moderate_volume_increase, 2.0),  # Volumenfilter hinzugefügt
+                    'micro_breakout_down': (micro_breakout_down & (volume_increasing | extreme_volume_spike), 2.2),  # Stärkerer Volumenfilter
+                    
+                    # Bollinger-Band-Signale präzisiert durch Volumen
+                    'bb_touch_upper': (bb_touch_upper & volume_trend_up, 1.8),  # Volumentrend-Bestätigung
+                    'bb_touch_upper_10': (bb_touch_upper_10 & volume_trend_up, 1.5),  # Volumentrend-Bestätigung
+                    
+                    # Momentum-Signale mit Volumenfilter (höhere Qualität)
+                    'momentum_reversal_down': (momentum_reversal_down & vol_confirms_price_down, 2.0),  # Mit Volumenfilter
+                    'strong_momentum_down': (strong_momentum_down & extreme_volume_spike, 1.8),  # Mit Volumenfilter
+                    
+                    # C. BESTÄTIGENDE SIGNALE (GERINGERES GEWICHT, ABER WICHTIG FÜR QUALITÄT)
+                    
+                    # Kerzenmuster mit Volumenfilter
+                    'shooting_star': (shooting_star & volume_increasing, 1.5),  # Volumenfilter hinzugefügt
+                    
+                    # Stochastik-Signale mit Volumenfilter
+                    'stoch_cross_down': (stoch_cross_down & moderate_volume_increase, 1.2),  # Volumenfilter hinzugefügt
+                    'stoch_overbought_reversal': (stoch_overbought_reversal & (volume_increasing | sudden_volume_spike), 1.7),  # Volumenfilter
+                    
+                    # Direkte Volumen-Signale (neuer Abschnitt)
+                    'extreme_volume_spike_down': (extreme_volume_spike & (data['close'] < data['close'].shift(1)), 1.8),  # Starker Volumenanstieg
+                    'volume_trend_acceleration': (volume_trend_up & (data['close'] < data['close'].shift(1)), 1.0),  # Bestätigter Volumentrend
+                }
                 
-                # === Strategie 3: Bollinger Band Ausbruch und Mean-Reversion ===
-                # Kauf wenn Preis unter unteres Bollinger Band fällt und dann darüber schließt
-                bollinger_oversold = data['close'].shift(1) < data['bb_lower'].shift(1) & \
-                                    data['close'] > data['bb_lower']
+                # Berechne Kauf-Score - deutlich reduzierte Schwelle für mehr Signale
+                buy_score = pd.Series(0, index=data.index)
+                for cond, weight in buy_conditions.values():
+                    buy_score += (cond.fillna(False)).astype(float) * weight
                 
-                # Zusätzlich: Bollinger Band Squeeze für volatile Breakout-Phasen erkennen
-                # Squeeze = wenn die Bänder enger werden als normal (multipliziert mit Faktor)
-                bb_bandwidth = (data['bb_upper'] - data['bb_lower']) / data['bb_middle']
-                bb_bandwidth_avg = bb_bandwidth.rolling(window=20).mean()
-                bb_squeeze_condition = bb_bandwidth < (bb_bandwidth_avg / self.bb_squeeze_factor)
+                total_buy_weight = sum(weight for _, weight in buy_conditions.values())
+                normalized_buy_score = 100 * buy_score / total_buy_weight
                 
-                # === Strategie 4: Volumenvalidierung ===
-                # Überdurchschnittliches Volumen als Bestätigung
-                # Berechne Volumen-Ratio (aktuelles Volumen / durchschnittliches Volumen)
-                if 'volume' in data.columns:
-                    data['volume_sma'] = data['volume'].rolling(window=20).mean()
-                    data['volume_ratio'] = data['volume'] / data['volume_sma']
-                    high_volume = data['volume_ratio'] > self.volume_confirm_ratio
-                else:
-                    high_volume = pd.Series(True, index=data.index)  # Fallback wenn kein Volumen
+                # Berechne Verkauf-Score - deutlich reduzierte Schwelle für mehr Signale
+                sell_score = pd.Series(0, index=data.index)
+                for cond, weight in sell_conditions.values():
+                    sell_score += (cond.fillna(False)).astype(float) * weight
                 
-                # Trend-Validierung für zusätzliche Bestätigung
-                uptrend = data['close'] > data['sma_medium']
+                total_sell_weight = sum(weight for _, weight in sell_conditions.values())
+                normalized_sell_score = 100 * sell_score / total_sell_weight
+                
+                # Optimierte Schwellenwerte für bessere Signalqualität im 5m HF-Trading
+                # Basierend auf Backtest-Ergebnissen und Perplexity-Empfehlungen
+                buy_threshold = 6.5  # Von 5 auf 6.5 erhöht für höhere Signalqualität
+                sell_threshold = 8  # Von 7 auf 8 erhöht für besseren Schutz gegen falsche Verkaufssignale
+                
+                # === OPTIMIERTE SIGNALGENERIERUNG MIT VOLUMENFILTER ===
+                # Speichere Scores im DataFrame für Debugging und Feinabstimmung
+                data['buy_score'] = normalized_buy_score
+                data['sell_score'] = normalized_sell_score
+                
+                # Kaufsignal: Buy-Score über Schwellenwert mit optimierten Bedingungen für 5m HF-Trading
+                # Volumenfilter angepasst für bessere Signalqualität
+                buy_signal = (normalized_buy_score > buy_threshold) & \
+                             (normalized_buy_score > normalized_sell_score * 1.2) & \
+                             (moderate_volume_increase | volume_increasing | vol_confirms_price_up)  # Optimierte Volumenfilter
+                
+                # Verkaufssignal: Sell-Score über Schwellenwert mit verbessertem Schutz für 5m HF-Trading
+                # Stärkerer Volumenfilter für höhere Verkaufssignal-Qualität
+                sell_signal = (normalized_sell_score > sell_threshold) & \
+                              (normalized_sell_score > normalized_buy_score * 1.4) & \
+                              (sudden_volume_spike | vol_confirms_price_down | vol_negative_divergence)  # Verbesserter Volumenfilter für robustere Signale
+                
+                # Optimierte direkte Kaufsignale für 5m HF-Trading mit Bollinger+MACD+RSI Kombinationen
+                # Basierend auf Perplexity-Empfehlungen für DOGEBTC
+                direct_buy_signal = (
+                    ((micro_bounce_up & (volume_increasing | data['volume'] > data['volume_sma_5'])) | 
+                     # Verbesserte Bollinger Band + RSI Kombination
+                     (bb_touch_lower & data['rsi_ultra'] < 40 & (sudden_volume_spike | volume_increasing)) | 
+                     # Optimierte RSI-Schwellenwerte für DOGEBTC
+                     ((data['rsi_ultra'] < 30) & (sudden_volume_spike | volume_increasing)) |  
+                     # Hammer-Pattern mit stärkerem Volumenfilter
+                     (hammer & (sudden_volume_spike | volume_increasing)) |
+                     # MACD Bullish Crossover mit Volumenbestätigung
+                     ((data['macd_hist'] > 0) & (data['macd_hist'] > data['macd_hist'].shift(1)) & (data['volume'] > data['volume_sma_3'])) |
+                     # Stärkerer Mikro-Momentum-Filter
+                     ((data['macd_hist'] > data['macd_hist'].shift(1)) & 
+                      (data['macd_hist'].shift(1) > data['macd_hist'].shift(2)) & 
+                      (data['close'] > data['sma_short'])))
+                )
+                
+                # Optimierte direkte Verkaufssignale mit höheren Schutzmaßnahmen für 5m HF-Trading
+                direct_sell_signal = (
+                    ((micro_bounce_down & sudden_volume_spike) | 
+                     # Verbesserte Bollinger Band + RSI Kombination
+                     (bb_touch_upper & data['rsi_ultra'] > 60 & sudden_volume_spike) | 
+                     # Optimierter RSI-Filter für DOGEBTC
+                     ((data['rsi_ultra'] > 70) & (sudden_volume_spike | vol_confirms_price_down)) |  
+                     # Shooting Star mit stärkerer Volumenbestätigung
+                     (shooting_star & (vol_confirms_price_down | sudden_volume_spike)) | 
+                     ((data['macd_hist'] < 0) & (data['macd_hist'] < data['macd_hist'].shift(1)) & moderate_volume_increase) |  # Volumenfilter gelockert
+                     ((data['macd_hist'] < data['macd_hist'].shift(1)) & (data['macd_hist'].shift(1) < data['macd_hist'].shift(2)) & moderate_volume_increase) |  # Mikro-Momentum
+                     (vol_negative_divergence & (data['close'] > data['sma_short'])))  # Zusätzlicher Schutz
+                )
+                
+                # Initialisiere oder setze Signal-Spalten zurück
+                data['signal'] = 0  # 0 = keine Aktion, 1 = Kauf, -1 = Verkauf
+                data['signal_strength'] = 0.0  # Stärke des Signals (für Positionsgrößenanpassung)
+                data['signal_quality'] = 0  # Neue Spalte für Signalqualität (0-10)
+                
+                # Setze Kaufsignal (1) mit Signalstärke und -qualität
+                buy_mask = buy_signal | direct_buy_signal
+                data.loc[buy_mask, 'signal'] = 1
+                data.loc[buy_mask, 'signal_strength'] = normalized_buy_score / 100  # Signalstärke (0-1)
+                
+                # Berechne Signalqualität für Kaufsignale (0-10 Skala)
+                # Höhere Qualität, wenn Volumen und Preis übereinstimmen
+                buy_quality = np.zeros(len(data))
+                buy_quality = np.where(extreme_volume_spike, buy_quality + 3, buy_quality)  # +3 für extremes Volumen
+                buy_quality = np.where(vol_confirms_price_up, buy_quality + 2, buy_quality)  # +2 für Volumen-Preis-Bestätigung
+                buy_quality = np.where(vol_positive_divergence, buy_quality + 2, buy_quality)  # +2 für positive Divergenz
+                buy_quality = np.where(volume_trend_up, buy_quality + 1, buy_quality)  # +1 für steigenden Volumentrend
+                buy_quality = np.where(moderate_volume_increase, buy_quality + 1, buy_quality)  # +1 für moderaten Volumenanstieg
+                buy_quality = np.where(buy_quality > 5, 5, buy_quality)  # Auf Max 5 begrenzen
+                buy_quality = buy_quality + 5  # Basisscore von 5 hinzufügen
+                
+                data.loc[buy_mask, 'signal_quality'] = buy_quality[buy_mask]
+                
+                # Setze Verkaufssignal (-1) mit Signalstärke und -qualität
+                sell_mask = sell_signal | direct_sell_signal
+                data.loc[sell_mask, 'signal'] = -1
+                data.loc[sell_mask, 'signal_strength'] = normalized_sell_score / 100  # Signalstärke (0-1)
+                
+                # Berechne Signalqualität für Verkaufssignale (0-10 Skala)
+                # Höhere Qualität, wenn Volumen und Preis übereinstimmen
+                sell_quality = np.zeros(len(data))
+                sell_quality = np.where(extreme_volume_spike, sell_quality + 3, sell_quality)  # +3 für extremes Volumen
+                sell_quality = np.where(vol_confirms_price_down, sell_quality + 2, sell_quality)  # +2 für Volumen-Preis-Bestätigung
+                sell_quality = np.where(vol_negative_divergence, sell_quality + 2, sell_quality)  # +2 für negative Divergenz
+                sell_quality = np.where(volume_trend_up, sell_quality + 1, sell_quality)  # +1 für steigenden Volumentrend
+                sell_quality = np.where(moderate_volume_increase, sell_quality + 1, sell_quality)  # +1 für moderaten Volumenanstieg
+                sell_quality = np.where(sell_quality > 5, 5, sell_quality)  # Auf Max 5 begrenzen
+                sell_quality = sell_quality + 5  # Basisscore von 5 hinzufügen
+                
+                data.loc[sell_mask, 'signal_quality'] = sell_quality[sell_mask]
+                
+                # Bei Signalkonflikten: Entscheide basierend auf Signal-Qualität und -Stärke
+                conflict_mask = (buy_mask & sell_mask)
+                if conflict_mask.any():
+                    # Berechne gewichtete Bewertung (Qualität * Stärke)
+                    for idx in data.index[conflict_mask]:
+                        buy_weight = data.loc[idx, 'signal_quality'] * data.loc[idx, 'signal_strength'] if buy_mask[idx] else 0
+                        sell_weight = data.loc[idx, 'signal_quality'] * data.loc[idx, 'signal_strength'] if sell_mask[idx] else 0
+                        
+                        # Wähle das stärkere gewichtete Signal
+                        data.loc[idx, 'signal'] = 1 if buy_weight > sell_weight else -1
+                
+                # Intelligente Signalfilterung basierend auf Qualität und Abstand
+                # Dies verhindert zu häufiges Trading, erlaubt aber qualitativ hochwertige Signale
+                last_signal_idx = -np.inf
+                min_periods_between_signals = 1  # Basis-Mindestabstand für HFT
+                quality_factor = 0.2  # Qualitative Signale können den Mindestabstand reduzieren
+                
+                for i in range(len(data)):
+                    if data.iloc[i]['signal'] != 0:  # Wenn ein Signal vorhanden ist
+                        # Signalqualität (0-10) und Stärke (0-1) abrufen
+                        signal_quality = data.iloc[i]['signal_quality']
+                        signal_strength = data.iloc[i]['signal_strength']
+                        
+                        # Dynamischer Mindestabstand basierend auf Signalqualität
+                        # Hochwertige Signale dürfen näher am letzten Signal liegen
+                        dynamic_min_periods = max(0, min_periods_between_signals - (signal_quality * quality_factor))
+                        
+                        # Prüfe, ob das Signal zu nah am letzten Signal liegt
+                        if i - last_signal_idx <= dynamic_min_periods:
+                            # Signal zu nah am letzten - entscheide welches zu behalten
+                            if last_signal_idx >= 0:  # Falls es ein vorheriges Signal gibt
+                                prev_quality = data.iloc[last_signal_idx]['signal_quality']
+                                prev_strength = data.iloc[last_signal_idx]['signal_strength']
+                                
+                                # Qualität und Stärke kombiniert vergleichen (gewichtete Bewertung)
+                                current_score = signal_quality * 0.7 + signal_strength * 30 * 0.3  # Qualität hat mehr Gewicht
+                                prev_score = prev_quality * 0.7 + prev_strength * 30 * 0.3
+                                
+                                if current_score > prev_score * 1.2:  # Neues Signal ist signifikant besser (20% Schwelle)
+                                    # Lösche altes Signal, behalte das neue
+                                    data.iloc[last_signal_idx, data.columns.get_loc('signal')] = 0
+                                    data.iloc[last_signal_idx, data.columns.get_loc('signal_strength')] = 0
+                                    data.iloc[last_signal_idx, data.columns.get_loc('signal_quality')] = 0
+                                    last_signal_idx = i  # Update last signal index
+                                else:
+                                    # Behalte altes Signal, lösche das neue
+                                    data.iloc[i, data.columns.get_loc('signal')] = 0
+                                    data.iloc[i, data.columns.get_loc('signal_strength')] = 0
+                                    data.iloc[i, data.columns.get_loc('signal_quality')] = 0
+                            else:
+                                # Kein vorheriges Signal, behalte das aktuelle
+                                last_signal_idx = i
+                        else:
+                            # Genug Abstand zum letzten Signal, behalte es
+                            last_signal_idx = i
+                
+                logger.info(f"Hochfrequenz-Handelssignale generiert: {data['signal'].abs().sum()} Signale.")
+                return data
                 
             except Exception as e:
-                logger.error(f"Fehler bei Kaufsignal-Berechnung: {e}")
-                return df
-                
-            # Berechne optimierte Verkaufsbedingungen basierend auf Backtesting-Ergebnissen
-            try:
-                # === Strategie 1: Kurzer RSI (2 Perioden) mit überkauftem Zustand ===
-                # Research zeigt, dass 2-Perioden RSI bei Werten über 85 starke Verkaufssignale gibt
-                rsi_short_overbought = data['rsi_short'] > self.rsi_sell_threshold  # RSI(2) > 85
-                
-                # === Strategie 2: MACD-Histogramm mit Umkehrung nach oben ===
-                # MACD-Histogramm mit Trendumkehr für Verkaufssignale
-                macd_high_reversal = (data['macd_hist'].shift(1) > data['macd_hist'].shift(2)) & \
-                                  (data['macd_hist'] < data['macd_hist'].shift(1)) & \
-                                  (data['macd_hist'] > 0)  # Histogramm noch positiv aber fallend
-                
-                # === Strategie 3: Bollinger Band Ausbruch und Mean-Reversion ===
-                # Verkauf wenn Preis über oberes Bollinger Band steigt und dann darunter schließt
-                bollinger_overbought = (data['close'].shift(1) > data['bb_upper'].shift(1)) & \
-                                      (data['close'] < data['bb_upper'])
-                
-                # Zusätzlich: Trailing-Stop basierend auf ATR oder Bollinger-Untergrenze
-                # Berechne Trailing-Stop als aktueller Preis minus X% oder BB Untergrenze
-                if 'close' in data.columns:
-                    trailing_stop = data['close'] * (1 - self.trailing_stop_pct/100)
-                    # Für bereits gekaufte Positionen, wenn der Preis unter den Trailing-Stop fällt
-                    trailing_stop_triggered = data['close'] < trailing_stop
-                else:
-                    trailing_stop_triggered = pd.Series(False, index=data.index)
-                
-                # === Strategie 4: Volumenvalidierung ===
-                # Hoher Volumenanstieg bei Preisruckgang = möglicher Ausverkauf
-                if 'volume' in data.columns and 'volume_ratio' in data.columns:
-                    volume_spike = (data['volume_ratio'] > 1.5) & (data['close'] < data['close'].shift(1))
-                else:
-                    volume_spike = pd.Series(False, index=data.index)
-                
-                # Abwärtstrend als zusätzliche Bestätigung für Verkaufssignale
-                downtrend = data['close'] < data['sma_medium']
-                price_dropping = data['close'] < data['close'].shift(1)
-                
-            except Exception as e:
-                logger.error(f"Fehler bei Verkaufssignal-Berechnung: {e}")
+                logger.error(f"Fehler bei der Signalberechnung für Hochfrequenzhandel: {e}")
                 return df
             
             # Kombiniere optimierte Kaufstrategien mit gewichteter Bewertung

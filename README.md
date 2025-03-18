@@ -138,7 +138,7 @@ git remote add origin https://github.com/yourusername/binance-trading-bot.git
 
 # Änderungen pushen
 git push -u origin main
-```bash
+```
 
 ## Erweiterte Funktionen
 
@@ -208,6 +208,7 @@ Der Bot implementiert umfassende Fehlerbehandlung, um auch bei instabilen Marktb
 - **Verbesserte Logging**: Detailliertes Logging mit Stack-Traces für bessere Fehleranalyse
 - **Automatische Wiederherstellung**: Automatische Wiederaufnahme nach Verbindungsproblemen
 - **Daten-Validierung**: Umfangreiche Prüfung auf fehlende oder ungültige Daten
+
 
 ## Risikomanagement
 

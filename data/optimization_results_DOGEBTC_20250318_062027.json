@@ -1,0 +1,702 @@
+[
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 3,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.0,
+            "atr_period": 14,
+            "atr_multiplier": 2.0,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    },
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 3,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.0,
+            "atr_period": 14,
+            "atr_multiplier": 2.5,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    },
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 3,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.0,
+            "atr_period": 21,
+            "atr_multiplier": 2.0,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    },
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 3,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.0,
+            "atr_period": 21,
+            "atr_multiplier": 2.5,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    },
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 3,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.5,
+            "atr_period": 14,
+            "atr_multiplier": 2.0,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    },
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 3,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.5,
+            "atr_period": 14,
+            "atr_multiplier": 2.5,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    },
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 3,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.5,
+            "atr_period": 21,
+            "atr_multiplier": 2.0,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    },
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 3,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.5,
+            "atr_period": 21,
+            "atr_multiplier": 2.5,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    },
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 5,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.0,
+            "atr_period": 14,
+            "atr_multiplier": 2.0,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    },
+    {
+        "params": {
+            "bb_period": 20,
+            "bb_std": 1.8,
+            "bb_weight": 1.0,
+            "stoch_k": 14,
+            "stoch_d": 5,
+            "stoch_smooth": 3,
+            "stoch_weight": 1.0,
+            "atr_period": 14,
+            "atr_multiplier": 2.5,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "rsi_weight": 1.0,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "macd_weight": 1.0,
+            "risk_per_trade": 0.01
+        },
+        "total_return": -2.970092045737427,
+        "max_drawdown": -2.312522238493998,
+        "sharpe_ratio": -2.545165268448452,
+        "win_ratio": 40.0,
+        "num_trades": 5,
+        "final_value": 0.9702990795426257,
+        "trades": [
+            {
+                "timestamp": "2024-12-31 00:00:00",
+                "type": "buy",
+                "price": 3.38e-06,
+                "amount": 2958.579881656805,
+                "value": 0.01,
+                "fee": 1e-05
+            },
+            {
+                "timestamp": "2025-01-04 00:00:00",
+                "type": "sell",
+                "price": 3.87e-06,
+                "amount": 2958.579881656805,
+                "value": 3.866130000000001e-08,
+                "fee": 3.8661300000000006e-11
+            },
+            {
+                "timestamp": "2025-01-28 00:00:00",
+                "type": "buy",
+                "price": 3.27e-06,
+                "amount": 3027.5230538918618,
+                "value": 0.009900000386226388,
+                "fee": 9.900000386226389e-06
+            },
+            {
+                "timestamp": "2025-03-07 00:00:00",
+                "type": "sell",
+                "price": 2.24e-06,
+                "amount": 3027.5230538918618,
+                "value": 2.2153824864281967e-08,
+                "fee": 2.2153824864281967e-11
+            },
+            {
+                "timestamp": "2025-03-08 00:00:00",
+                "type": "buy",
+                "price": 2.28e-06,
+                "amount": 4298.684475298611,
+                "value": 0.009801000603680833,
+                "fee": 9.801000603680834e-06
+            }
+        ]
+    }
+]
