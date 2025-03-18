@@ -2,13 +2,13 @@
     "name": "High Profit Pattern",
     "description": "An optimized trading pattern for higher profitability with sophisticated entry/exit conditions",
     "version": "2.0",
-    "signal_threshold": 4.0,
+    "signal_threshold": 2.0,
     "risk_params": {
-        "take_profit_pct": 2.2,
-        "stop_loss_pct": 1.0,
-        "max_trade_duration": 48,
-        "trailing_stop_pct": 1.2,
-        "max_drawdown_pct": 3.0,
+        "take_profit_pct": 0.8,
+        "stop_loss_pct": 0.5,
+        "max_trade_duration": 8,
+        "trailing_stop_pct": 0.5,
+        "max_drawdown_pct": 5.0,
         "position_sizing": "risk_adjusted"
     },
     "buy_conditions": [
