@@ -197,12 +197,31 @@ class MultiIndicatorStrategy(BaseStrategy):
             new_columns['sma_5'] = sma5
             new_columns['sma_5_prev'] = sma5.shift(1)
         
-        # Min/Max values over periods
+        # Min/Max values over periods - calculate all at once to prevent fragmentation
         for period in [10, 20]:
             if 'high' in data_copy.columns:
                 new_columns[f'high_max{period}'] = data_copy['high'].rolling(window=period).max()
             if 'low' in data_copy.columns:
                 new_columns[f'low_min{period}'] = data_copy['low'].rolling(window=period).min()
+        
+        # Add Bollinger Band width if needed
+        if all(col in data_copy.columns for col in ['bb_upper', 'bb_lower', 'bb_middle']):
+            new_columns['bb_width'] = (data_copy['bb_upper'] - data_copy['bb_lower']) / data_copy['bb_middle']
+            new_columns['bb_width_prev'] = new_columns['bb_width'].shift(1)
+        
+        # Add missing EMAs if needed for patterns
+        for period in [5, 10, 12, 26]:
+            if f'ema_{period}' not in data_copy.columns and 'close' in data_copy.columns:
+                new_columns[f'ema_{period}'] = data_copy['close'].ewm(span=period, adjust=False).mean()
+                new_columns[f'ema_{period}_prev'] = new_columns[f'ema_{period}'].shift(1)
+        
+        # Add ADX if not present but needed
+        if 'adx' not in data_copy.columns and all(col in data_copy.columns for col in ['high', 'low', 'close']):
+            try:
+                import pandas_ta as ta
+                new_columns['adx'] = ta.adx(data_copy['high'], data_copy['low'], data_copy['close'], length=14)['ADX_14']
+            except Exception as e:
+                logger.warning(f"Could not calculate ADX: {e}")
         
         # Add unrealized PnL placeholder column (to be filled during evaluation)
         new_columns['unrealized_pnl_pct'] = pd.Series(0.0, index=data_copy.index)

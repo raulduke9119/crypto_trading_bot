@@ -1,0 +1,213 @@
+{
+    "name": "SuperOptimized Trading Pattern",
+    "description": "Highly optimized pattern that combines the best elements from all strategies with precise parameters",
+    "version": "2.0",
+    "signal_threshold": 3.2,
+    "risk_params": {
+        "take_profit_pct": 0.8,
+        "stop_loss_pct": 0.4,
+        "max_trade_duration": 10,
+        "trailing_stop_pct": 0.5,
+        "max_drawdown_pct": 1.2,
+        "position_sizing": "risk_adjusted"
+    },
+    "buy_conditions": [
+        {
+            "name": "RSI Divergence Bounce",
+            "description": "RSI recovering from oversold with momentum",
+            "conditions": [
+                {
+                    "indicator": "rsi",
+                    "operator": "<",
+                    "value": 40,
+                    "weight": 0.7
+                },
+                {
+                    "indicator": "rsi",
+                    "operator": ">",
+                    "indicator_compare": "rsi_prev",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "rsi_prev",
+                    "operator": ">",
+                    "indicator_compare": "rsi_prev2",
+                    "weight": 0.5
+                }
+            ],
+            "weight": 1.5
+        },
+        {
+            "name": "EMA Fast Cross",
+            "description": "Fast EMA crosses above slower EMA",
+            "conditions": [
+                {
+                    "indicator": "ema_5",
+                    "operator": ">",
+                    "indicator_compare": "ema_10",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "ema_5_prev",
+                    "operator": "<",
+                    "indicator_compare": "ema_10_prev",
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.2
+        },
+        {
+            "name": "Volume Price Confirmation",
+            "description": "Rising volume on price increase",
+            "conditions": [
+                {
+                    "indicator": "volume",
+                    "operator": ">",
+                    "indicator_compare": "volume_prev",
+                    "factor": 1.1,
+                    "weight": 0.8
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "close_prev",
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.1
+        },
+        {
+            "name": "MACD Signal",
+            "description": "MACD histogram turns positive",
+            "conditions": [
+                {
+                    "indicator": "macd_hist",
+                    "operator": ">",
+                    "value": 0,
+                    "weight": 0.9
+                },
+                {
+                    "indicator": "macd_hist_prev",
+                    "operator": "<",
+                    "value": 0,
+                    "weight": 0.8
+                }
+            ],
+            "weight": 1.3
+        },
+        {
+            "name": "Bollinger Bounce",
+            "description": "Price bouncing from lower Bollinger Band",
+            "conditions": [
+                {
+                    "indicator": "low_prev",
+                    "operator": "<",
+                    "indicator_compare": "bb_lower_prev",
+                    "factor": 1.01,
+                    "weight": 0.8
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "bb_lower",
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.2
+        },
+        {
+            "name": "Higher Lows",
+            "description": "Price making higher lows (uptrend)",
+            "indicator": "low",
+            "operator": ">",
+            "indicator_compare": "low_prev",
+            "weight": 0.8
+        }
+    ],
+    "sell_conditions": [
+        {
+            "name": "Dynamic Profit Target",
+            "description": "Take profit based on market volatility",
+            "conditions": [
+                {
+                    "indicator": "unrealized_pnl_pct",
+                    "operator": ">=",
+                    "value": 0.7,
+                    "weight": 1.5
+                },
+                {
+                    "indicator": "rsi",
+                    "operator": ">",
+                    "value": 65,
+                    "weight": 0.8
+                }
+            ],
+            "weight": 2.0
+        },
+        {
+            "name": "EMA Cross Down",
+            "description": "Fast EMA crosses below slower EMA",
+            "conditions": [
+                {
+                    "indicator": "ema_5",
+                    "operator": "<",
+                    "indicator_compare": "ema_10",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "ema_5_prev",
+                    "operator": ">",
+                    "indicator_compare": "ema_10_prev",
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.2
+        },
+        {
+            "name": "Volume Weakening",
+            "description": "Volume declining on price increase",
+            "conditions": [
+                {
+                    "indicator": "volume",
+                    "operator": "<",
+                    "indicator_compare": "volume_sma_5",
+                    "weight": 0.7
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "close_prev",
+                    "weight": 0.6
+                }
+            ],
+            "weight": 0.9
+        },
+        {
+            "name": "MACD Reversal",
+            "description": "MACD histogram turning negative",
+            "conditions": [
+                {
+                    "indicator": "macd_hist",
+                    "operator": "<",
+                    "value": 0,
+                    "weight": 0.8
+                },
+                {
+                    "indicator": "macd_hist_prev",
+                    "operator": ">",
+                    "value": 0,
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.0
+        },
+        {
+            "name": "RSI Overbought",
+            "description": "RSI reaching overbought levels",
+            "indicator": "rsi",
+            "operator": ">",
+            "value": 72,
+            "weight": 1.2
+        }
+    ]
+} 

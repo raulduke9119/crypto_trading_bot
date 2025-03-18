@@ -1181,62 +1181,149 @@ class TradingBot:
 
     def _calculate_position_size(self, symbol: str, data: pd.Series, signal_strength: float) -> float:
         """
-        Berechnet die optimale Positionsgröße basierend auf Risikoparametern und Signalstärke.
+        Calculates the optimal position size for a trade based on risk parameters and market conditions.
         
         Args:
-            symbol: Das Trading-Symbol
-            data: Die aktuellen Marktdaten
-            signal_strength: Die Stärke des Handelssignals (0-1)
+            symbol: Trading symbol
+            data: Current market data point
+            signal_strength: Strength of the trading signal (0.0-1.0)
             
         Returns:
-            Position size in der jeweiligen Krypto-Währung
+            Quantity to trade
         """
         try:
-            # Hole Balance für dieses Symbol (USDT bei Krypto-Paaren)
-            available_balance = self.initial_balance
-            
-            # Bei Live-Trading tatsächlichen Kontostand verwenden
-            if hasattr(self, 'client') and not self.backtest_data:
-                try:
-                    account_info = self.client.get_account()
-                    for balance_info in account_info.get('balances', []):
-                        if balance_info['asset'] == 'USDT':
-                            available_balance = float(balance_info['free'])
-                            break
-                except Exception as e:
-                    logger.warning(f"Fehler beim Abrufen der Kontobalance: {e}")
-            
-            # Risikobetrag berechnen (Prozentsatz des verfügbaren Kapitals)
-            risk_amount = available_balance * (self.risk_percentage / 100)
-            
-            # Modifiziere Risikobetrag basierend auf der Signalstärke
-            risk_amount = risk_amount * signal_strength
-            
-            # Prüfe ob ausreichend Balance vorhanden ist
-            if risk_amount <= 0:
+            # Get account balance
+            balance = self.executor.get_account_balance()
+            if balance <= 0:
+                logger.warning(f"Account balance is too low for trading: {balance} USDT")
                 return 0.0
-            
-            # Berechne Positionsgröße
-            current_price = float(data['close'])
+                
+            # Get current price
+            current_price = data['close']
             if current_price <= 0:
-                logger.warning(f"Ungültiger Preis für {symbol}: {current_price}")
+                logger.warning(f"Invalid price for {symbol}: {current_price}")
                 return 0.0
                 
-            # Positionsgröße = Risikobetrag / aktueller Preis
-            position_size = risk_amount / current_price
-            
-            # Runde auf angemessene Nachkommastellen (je nach Symbol unterschiedlich)
-            # Für die meisten Kryptos reichen 5-6 Nachkommastellen
-            position_size = round(position_size, 6)
-            
-            # Stelle sicher, dass Mindestgröße erreicht wird (Symbol-abhängig)
-            min_size = 0.000001  # Beispielwert, sollte je nach Exchange angepasst werden
-            if position_size < min_size:
-                logger.warning(f"Berechnete Positionsgröße {position_size} für {symbol} unter Mindestgröße {min_size}")
-                return 0.0
+            # Calculate maximum position size based on account balance
+            max_position_value = balance / self.max_positions
                 
-            return position_size
+            # Apply risk percentage to determine risk amount
+            # Adjust risk based on signal strength - stronger signals get more allocation
+            adjusted_risk = self.risk_percentage * (0.8 + (signal_strength * 0.4))
+            risk_amount = (adjusted_risk / 100) * balance
+                
+            # Get ATR for volatility-based position sizing
+            atr = data.get('atr', 0)
+            if atr <= 0:
+                atr = current_price * 0.01  # Default to 1% if ATR not available
+                
+            # Calculate position size based on ATR (volatility-adjusted position sizing)
+            if self.strategy.volatility_adjustment and atr > 0:
+                # More conservative stops for higher volatility
+                stop_distance = atr * 1.5
+                if stop_distance > 0:
+                    # Position size = risk amount / stop distance
+                    position_size = risk_amount / stop_distance
+                    
+                    # Convert to quantity
+                    quantity = position_size / current_price
+                else:
+                    # Fallback to simpler calculation
+                    quantity = risk_amount / current_price
+            else:
+                # Simple position sizing using fixed risk percentage
+                quantity = risk_amount / current_price
+                
+            # Limit position value to maximum allowed per position
+            if quantity * current_price > max_position_value:
+                quantity = max_position_value / current_price
+                
+            # Apply signal strength adjustment
+            # Stronger signals get closer to full allocation, weaker signals get reduced
+            quantity *= (0.7 + (signal_strength * 0.5))
+                
+            # Round to appropriate precision based on symbol filters
+            symbol_info = self.executor.get_symbol_filters(symbol)
+            if symbol_info and 'LOT_SIZE' in symbol_info:
+                step_size = symbol_info['LOT_SIZE'].get('stepSize', 0.00001)
+                quantity = self.executor.round_step_size(quantity, float(step_size))
+                
+            logger.debug(f"Calculated position size for {symbol}: {quantity} (value: {quantity * current_price:.2f} USDT)")
+            return quantity
             
         except Exception as e:
-            logger.error(f"Fehler bei der Berechnung der Positionsgröße für {symbol}: {e}")
+            logger.error(f"Error calculating position size: {e}")
             return 0.0
+
+    # Add a new method to dynamically adjust stop losses based on market conditions
+    def _adjust_stop_levels(self, position, current_data):
+        """
+        Dynamically adjusts stop loss and take profit levels based on market conditions.
+        
+        Args:
+            position: The current position
+            current_data: Current market data
+            
+        Returns:
+            Updated position with adjusted stop levels
+        """
+        try:
+            if position is None or current_data is None:
+                return position
+                
+            # Get ATR for volatility-based adjustments
+            atr = current_data.get('atr', 0)
+            if atr <= 0:
+                atr = current_data['close'] * 0.01  # Default to 1% if ATR not available
+                
+            # Set initial stop loss if not set
+            if position.stop_loss_level is None:
+                # For long positions, stop is below entry
+                if position.direction == 'long':
+                    stop_distance = max(atr * 1.5, position.entry_price * (self.strategy.stop_loss_pct / 100))
+                    position.stop_loss_level = position.entry_price - stop_distance
+                else:  # For short positions, stop is above entry
+                    stop_distance = max(atr * 1.5, position.entry_price * (self.strategy.stop_loss_pct / 100))
+                    position.stop_loss_level = position.entry_price + stop_distance
+                    
+            # Set take profit if not set
+            if position.take_profit_level is None:
+                # Dynamic take profit based on volatility
+                # Higher volatility = higher take profit targets
+                volatility_factor = atr / current_data['close']
+                adjusted_take_profit = self.strategy.take_profit_pct * (1 + volatility_factor * 10)
+                
+                # For long positions, take profit is above entry
+                if position.direction == 'long':
+                    position.take_profit_level = position.entry_price * (1 + adjusted_take_profit / 100)
+                else:  # For short positions, take profit is below entry
+                    position.take_profit_level = position.entry_price * (1 - adjusted_take_profit / 100)
+                    
+            # Update trailing stop if needed
+            if position.trailing_stop_level is None:
+                position.trailing_stop_level = position.stop_loss_level
+                
+            # Adjust trailing stop based on price movement
+            if position.direction == 'long' and current_data['close'] > position.entry_price:
+                # Calculate new trailing stop level
+                new_stop = current_data['close'] * (1 - self.strategy.trailing_stop_pct / 100)
+                
+                # Only move stop up, never down
+                if new_stop > position.trailing_stop_level:
+                    position.trailing_stop_level = new_stop
+                    logger.debug(f"Adjusted trailing stop to {position.trailing_stop_level} for {position.symbol}")
+                    
+            elif position.direction == 'short' and current_data['close'] < position.entry_price:
+                # Calculate new trailing stop level for shorts
+                new_stop = current_data['close'] * (1 + self.strategy.trailing_stop_pct / 100)
+                
+                # Only move stop down, never up
+                if new_stop < position.trailing_stop_level:
+                    position.trailing_stop_level = new_stop
+                    logger.debug(f"Adjusted trailing stop to {position.trailing_stop_level} for {position.symbol}")
+                    
+            return position
+                
+        except Exception as e:
+            logger.error(f"Error adjusting stop levels: {e}")
+            return position

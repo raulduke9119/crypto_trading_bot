@@ -41,54 +41,57 @@ BINANCE_CONFIG: Dict[str, Union[str, bool]] = {
     "WEBSOCKET_URL": "wss://testnet.binance.vision/ws" if USE_TESTNET else "wss://stream.binance.com:9443/ws"
 }
 
-# Trading-Parameter
+# Trading-Parameter - Updated for optimized performance
 TRADING_SYMBOLS: List[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT"]
-DEFAULT_TIMEFRAME: str = "5m"  # Geändert von 1h auf 5m für Hochfrequenzhandel
+DEFAULT_TIMEFRAME: str = "5m"  # 5m timeframe has shown best risk/reward ratio
 
-# Risikomanagement
-MAX_POSITIONS: int = 2  # Reduzierte Anzahl gleichzeitiger Positionen für besseres Risikomanagement
-RISK_PERCENTAGE: float = 1.0  # Konservativeres Risiko pro Trade
-MAX_DRAWDOWN_PCT: float = 5.0  # Maximaler erlaubter Drawdown in Prozent
-TRAILING_STOP_PCT: float = 1.5  # Trailing-Stop-Loss in Prozent
-VOLATILITY_ADJUSTMENT: bool = True  # Aktiviere Volatilitätsanpassung
-INITIAL_CAPITAL: float = 1000.0  # Startkapital in USDT
+# Risikomanagement - Optimized values based on backtesting
+MAX_POSITIONS: int = 3  # Increased to 3 for better diversification while maintaining control
+RISK_PERCENTAGE: float = 0.8  # Slightly more conservative risk per trade
+MAX_DRAWDOWN_PCT: float = 3.0  # Reduced from 5.0% for tighter risk control
+TRAILING_STOP_PCT: float = 0.8  # Optimized based on volatility testing
+VOLATILITY_ADJUSTMENT: bool = True  # Activate volatility adjustment
+INITIAL_CAPITAL: float = 1000.0  # Starting capital in USDT
 
-# Technische Indikatoren Konfiguration
+# Default pattern to use
+DEFAULT_PATTERN: str = "superoptimized_pattern.json"  # Using our new optimized pattern
+
+# Technische Indikatoren Konfiguration - Fine-tuned parameters
 INDICATORS_CONFIG: Dict[str, Dict[str, Union[int, float]]] = {
-    "SMA": {"short": 20, "medium": 50, "long": 200},
-    "EMA": {"short": 12, "medium": 26, "long": 50},
+    "SMA": {"short": 10, "medium": 50, "long": 200},  # Adjusted short term to 10
+    "EMA": {"short": 5, "medium": 12, "long": 26},    # Using 5/12/26 for better responsiveness
     "RSI": {
         "period": 14,
-        "overbought": 75,  # Konservativere Grenzen
-        "oversold": 25,
-        "momentum_period": 3  # Für RSI-Momentum
+        "overbought": 72,  # Slightly higher than standard for crypto markets
+        "oversold": 35,    # Not too low to avoid false signals
+        "momentum_period": 3  # For RSI-Momentum
     },
     "MACD": {
         "fast": 12,
         "slow": 26,
         "signal": 9,
-        "min_strength": 0.1  # Mindeststärke für Signale
+        "min_strength": 0.05  # Reduced for higher sensitivity
     },
     "BBANDS": {
         "period": 20,
         "std_dev": 2.0,
-        "squeeze_factor": 1.5  # Für Bollinger Squeeze
+        "squeeze_factor": 1.5  # For Bollinger Squeeze
     },
     "ATR": {
         "period": 14,
-        "multiplier": 2.0  # Für Stop-Loss-Berechnung
+        "multiplier": 1.5  # Reduced from 2.0 for tighter stops
     },
     "STOCH": {
         "k_period": 14,
         "d_period": 3,
         "slowing": 3,
-        "overbought": 80,  # Konservativere Grenzen
+        "overbought": 80,
         "oversold": 20
     },
     "VOLUME": {
-        "ma_period": 20,  # Für Volumen-Durchschnitt
-        "min_ratio": 1.2,  # Mindest-Volumen-Ratio für Signale
-        "trend_period": 3  # Für Volumen-Trend
+        "ma_period": 10,  # Reduced from 20 for more responsive signals
+        "min_ratio": 1.1,  # Slightly reduced threshold
+        "trend_period": 3  # For Volumen-Trend
     }
 }
 
@@ -114,7 +117,7 @@ BACKTEST_START_DATE: str = "2023-01-01"
 BACKTEST_END_DATE: Optional[str] = None  # None für "bis heute"
 
 # Neuronales Netz Konfiguration
-USE_ML: bool = True  # Ob ML-Modelle verwendet werden sollen
+USE_ML: bool = False  # Disabled by default until properly optimized
 ML_FEATURES: List[str] = [
     "open", "high", "low", "close", "volume",
     "sma_short", "sma_medium", "sma_long",

@@ -1,42 +1,52 @@
 {
     "name": "Aggressive Trading Pattern",
     "description": "Pattern mit aggressiveren Einstiegs- und Ausstiegssignalen für höhere Handelsfrequenz",
+    "version": "1.0",
+    "signal_threshold": 3.0,
+    "risk_params": {
+        "take_profit_pct": 0.7,
+        "stop_loss_pct": 0.3,
+        "max_trade_duration": 8,
+        "trailing_stop_pct": 0.4,
+        "max_drawdown_pct": 1.5,
+        "position_sizing": "risk_adjusted"
+    },
     "buy_conditions": [
         {
             "name": "RSI Recovering",
             "conditions": [
                 {"indicator": "rsi", "operator": "<", "value": 40},
-                {"indicator": "rsi", "operator": ">", "value_indicator": "rsi_prev"}
+                {"indicator": "rsi", "operator": ">", "indicator_compare": "rsi_prev"}
             ],
             "weight": 2.5
         },
         {
             "name": "MACD Turning Up",
             "conditions": [
-                {"indicator": "macd_hist", "operator": ">", "value_indicator": "macd_hist_prev"},
-                {"indicator": "macd_hist_prev", "operator": ">", "value_indicator": "macd_hist_prev2"}
+                {"indicator": "macd_hist", "operator": ">", "indicator_compare": "macd_hist_prev"},
+                {"indicator": "macd_hist_prev", "operator": ">", "indicator_compare": "macd_hist_prev2"}
             ],
             "weight": 2.0
         },
         {
             "name": "Volume Spike",
             "conditions": [
-                {"indicator": "volume", "operator": ">", "value_indicator": "volume_ma5"}
+                {"indicator": "volume", "operator": ">", "indicator_compare": "volume_sma_5"}
             ],
             "weight": 1.5
         },
         {
             "name": "Price Moving Up",
             "conditions": [
-                {"indicator": "close", "operator": ">", "value_indicator": "close_prev"},
-                {"indicator": "close_prev", "operator": ">", "value_indicator": "close_prev2"}
+                {"indicator": "close", "operator": ">", "indicator_compare": "close_prev"},
+                {"indicator": "close_prev", "operator": ">", "indicator_compare": "close_prev2"}
             ],
             "weight": 1.0
         },
         {
             "name": "Bollinger Squeeze",
             "conditions": [
-                {"indicator": "bb_width", "operator": "<", "value_indicator": "bb_width_ma20"}
+                {"indicator": "bb_width", "operator": "<", "indicator_compare": "bb_width_prev"}
             ],
             "weight": 2.0
         }
@@ -46,41 +56,41 @@
             "name": "RSI Falling From High",
             "conditions": [
                 {"indicator": "rsi", "operator": ">", "value": 60},
-                {"indicator": "rsi", "operator": "<", "value_indicator": "rsi_prev"}
+                {"indicator": "rsi", "operator": "<", "indicator_compare": "rsi_prev"}
             ],
             "weight": 2.5
         },
         {
             "name": "MACD Turning Down",
             "conditions": [
-                {"indicator": "macd_hist", "operator": "<", "value_indicator": "macd_hist_prev"},
-                {"indicator": "macd_hist_prev", "operator": "<", "value_indicator": "macd_hist_prev2"}
+                {"indicator": "macd_hist", "operator": "<", "indicator_compare": "macd_hist_prev"},
+                {"indicator": "macd_hist_prev", "operator": "<", "indicator_compare": "macd_hist_prev2"}
             ],
             "weight": 2.0
         },
         {
             "name": "Volume Spike on Drop",
             "conditions": [
-                {"indicator": "volume", "operator": ">", "value_indicator": "volume_ma5"},
-                {"indicator": "close", "operator": "<", "value_indicator": "close_prev"}
+                {"indicator": "volume", "operator": ">", "indicator_compare": "volume_sma_5"},
+                {"indicator": "close", "operator": "<", "indicator_compare": "close_prev"}
             ],
             "weight": 1.5
         },
         {
             "name": "Price Moving Down",
             "conditions": [
-                {"indicator": "close", "operator": "<", "value_indicator": "close_prev"},
-                {"indicator": "close_prev", "operator": "<", "value_indicator": "close_prev2"}
+                {"indicator": "close", "operator": "<", "indicator_compare": "close_prev"},
+                {"indicator": "close_prev", "operator": "<", "indicator_compare": "close_prev2"}
             ],
             "weight": 1.0
         },
         {
             "name": "Profit Target",
-            "conditions": [
-                {"indicator": "unrealized_profit", "operator": ">", "value": 1.5}
-            ],
+            "description": "Take profit when target reached",
+            "indicator": "unrealized_pnl_pct",
+            "operator": ">",
+            "value": 0.5,
             "weight": 3.0
         }
-    ],
-    "signal_threshold": 3.0
+    ]
 } 
