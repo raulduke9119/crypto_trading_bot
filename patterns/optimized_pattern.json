@@ -1,0 +1,196 @@
+{
+    "name": "Optimized Advanced Trading Pattern",
+    "description": "Pattern optimized for cryptocurrency market based on backtesting research",
+    "version": "3.0",
+    "signal_threshold": 3.5,
+    "risk_params": {
+        "take_profit_pct": 1.8,
+        "stop_loss_pct": 0.8,
+        "max_trade_duration": 24,
+        "trailing_stop_pct": 1.0,
+        "max_drawdown_pct": 2.5,
+        "position_sizing": "risk_adjusted"
+    },
+    "buy_conditions": [
+        {
+            "name": "RSI Divergence",
+            "description": "RSI forming bullish divergence",
+            "indicator": "rsi",
+            "operator": "<",
+            "value": 40,
+            "weight": 1.2
+        },
+        {
+            "name": "EMA Cross Up",
+            "description": "Fast EMA crosses above slow EMA",
+            "conditions": [
+                {
+                    "indicator": "ema_12",
+                    "operator": ">",
+                    "indicator_compare": "ema_26",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "ema_12_prev",
+                    "operator": "<",
+                    "indicator_compare": "ema_26_prev",
+                    "weight": 0.5
+                }
+            ],
+            "weight": 1.5
+        },
+        {
+            "name": "Volatility Breakout",
+            "description": "Price breaking out after low volatility period",
+            "conditions": [
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "bb_upper",
+                    "factor": 0.95,
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "bb_width",
+                    "operator": "<",
+                    "indicator_compare": "bb_width_prev",
+                    "factor": 1.1,
+                    "weight": 0.5
+                }
+            ],
+            "weight": 1.3
+        },
+        {
+            "name": "Volume Spike",
+            "description": "Volume significantly above average with price increase",
+            "conditions": [
+                {
+                    "indicator": "volume",
+                    "operator": ">",
+                    "indicator_compare": "volume_sma_20",
+                    "factor": 1.5,
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "open",
+                    "weight": 0.5
+                }
+            ],
+            "weight": 1.2
+        },
+        {
+            "name": "MACD Signal Line Cross",
+            "description": "MACD line crosses above signal line",
+            "conditions": [
+                {
+                    "indicator": "macd",
+                    "operator": ">",
+                    "indicator_compare": "macd_signal",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "macd_prev",
+                    "operator": "<",
+                    "indicator_compare": "macd_signal_prev",
+                    "weight": 0.5
+                }
+            ],
+            "weight": 1.0
+        },
+        {
+            "name": "Higher Lows",
+            "description": "Price making higher lows (uptrend confirmation)",
+            "indicator": "low",
+            "operator": ">",
+            "indicator_compare": "low_prev",
+            "weight": 0.8
+        }
+    ],
+    "sell_conditions": [
+        {
+            "name": "RSI Overbought",
+            "description": "RSI indicating overbought conditions",
+            "indicator": "rsi",
+            "operator": ">",
+            "value": 75,
+            "weight": 1.2
+        },
+        {
+            "name": "EMA Cross Down",
+            "description": "Fast EMA crosses below slow EMA",
+            "conditions": [
+                {
+                    "indicator": "ema_12",
+                    "operator": "<",
+                    "indicator_compare": "ema_26",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "ema_12_prev",
+                    "operator": ">",
+                    "indicator_compare": "ema_26_prev",
+                    "weight": 0.5
+                }
+            ],
+            "weight": 1.5
+        },
+        {
+            "name": "Volatility Breakdown",
+            "description": "Price breaking down after high volatility",
+            "indicator": "close",
+            "operator": "<",
+            "indicator_compare": "bb_lower",
+            "factor": 1.05,
+            "weight": 1.3
+        },
+        {
+            "name": "Volume Decline",
+            "description": "Volume declining with price increase (weakness)",
+            "conditions": [
+                {
+                    "indicator": "volume",
+                    "operator": "<",
+                    "indicator_compare": "volume_sma_10",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "close_prev",
+                    "factor": 1.005,
+                    "weight": 0.5
+                }
+            ],
+            "weight": 1.0
+        },
+        {
+            "name": "MACD Bearish Cross",
+            "description": "MACD crosses below signal line",
+            "conditions": [
+                {
+                    "indicator": "macd",
+                    "operator": "<",
+                    "indicator_compare": "macd_signal",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "macd_prev",
+                    "operator": ">",
+                    "indicator_compare": "macd_signal_prev",
+                    "weight": 0.5
+                }
+            ],
+            "weight": 1.0
+        },
+        {
+            "name": "Take Profit",
+            "description": "Take profit based on unrealized profit percentage",
+            "indicator": "unrealized_pnl_pct",
+            "operator": ">=",
+            "value": 1.5,
+            "weight": 2.0
+        }
+    ]
+} 

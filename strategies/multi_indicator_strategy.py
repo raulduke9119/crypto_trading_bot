@@ -8,6 +8,8 @@ import numpy as np
 import importlib.util
 import operator
 from typing import Dict, List, Optional, Union, Tuple, Any, Callable
+import warnings
+from enum import Enum
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,6 +20,15 @@ from config.config import LOG_LEVEL, LOG_FILE, DATA_DIRECTORY
 
 # Logger einrichten
 logger = setup_logger(os.path.join(DATA_DIRECTORY, LOG_FILE), LOG_LEVEL)
+
+# Suppress warnings from pandas operations
+warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
+
+class PositionStatus(Enum):
+    """Enum for position status recommendations"""
+    HOLD = "hold"
+    SELL = "sell"
+    REDUCE = "reduce"
 
 class MultiIndicatorStrategy(BaseStrategy):
     """
@@ -75,6 +86,27 @@ class MultiIndicatorStrategy(BaseStrategy):
         # Schwellenwerte aus dem Pattern extrahieren
         self.signal_threshold = self.pattern.get("signal_threshold", 4.0)
         
+        # Extrahiere erweiterte Risikomanagement-Parameter aus dem Pattern, falls vorhanden
+        self.risk_params = self.pattern.get("risk_params", {})
+        if self.risk_params:
+            self.take_profit_pct = self.risk_params.get("take_profit_pct", 2.0)
+            self.stop_loss_pct = self.risk_params.get("stop_loss_pct", 1.0)
+            self.max_trade_duration = self.risk_params.get("max_trade_duration", 48)
+            self.position_sizing_method = self.risk_params.get("position_sizing", "fixed")
+        else:
+            self.take_profit_pct = 2.0
+            self.stop_loss_pct = 1.0
+            self.max_trade_duration = 48
+            self.position_sizing_method = "fixed"
+        
+        # Überprüfe, ob wir die vom Pattern angegebenen Risikomanagement-Parameter verwenden sollen
+        if self.risk_params:
+            # Benutze die vom Pattern angegebenen Werte
+            if "trailing_stop_pct" in self.risk_params:
+                self.trailing_stop_pct = self.risk_params.get("trailing_stop_pct")
+            if "max_drawdown_pct" in self.risk_params:
+                self.max_drawdown_pct = self.risk_params.get("max_drawdown_pct")
+        
         # Operatormapping für Bedingungsprüfungen
         self.operator_map = {
             ">": operator.gt,
@@ -88,452 +120,413 @@ class MultiIndicatorStrategy(BaseStrategy):
         logger.info(f"Multi-Indikator-Strategie initialisiert: "
                    f"ML-Vorhersagen={use_ml_predictions}, "
                    f"Volatilitätsanpassung={volatility_adjustment}, "
-                   f"Trailing-Stop={trailing_stop_pct}%, "
-                   f"Max-Drawdown={max_drawdown_pct}%, "
+                   f"Trailing-Stop={self.trailing_stop_pct}%, "
+                   f"Max-Drawdown={self.max_drawdown_pct}%, "
                    f"Pattern={self.pattern_name}")
     
-    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+    def generate_signals(self, df):
         """
-        Generiert Handelssignale basierend auf dem geladenen Trading-Pattern.
+        Generates trading signals based on the loaded trading pattern.
         
         Args:
-            df: DataFrame mit technischen Indikatoren
+            df: DataFrame with OHLCV data and technical indicators
             
         Returns:
-            DataFrame mit hinzugefügten Signalspalten
+            DataFrame with buy_signal and sell_signal columns added
         """
-        try:
-            # Prüfe, ob der DataFrame leer ist
-            if df.empty:
-                logger.warning("DataFrame ist leer, keine Signale generiert")
-                return df
+        if df.empty:
+            logger.warning("Empty DataFrame provided to generate_signals")
+            return df
+        
+        # Preprocess DataFrame to prepare for indicator comparisons
+        df_with_indicators = self._preprocess_dataframe(df)
+        
+        # Apply pattern conditions to calculate buy and sell strengths
+        df_with_signals = self._apply_pattern_conditions(df_with_indicators)
+        
+        # Generate final buy/sell signals based on signal threshold
+        df_with_signals['buy_signal'] = (df_with_signals['buy_strength'] >= self.signal_threshold / 10).astype(int)
+        df_with_signals['sell_signal'] = (df_with_signals['sell_strength'] >= self.signal_threshold / 10).astype(int)
+        
+        # Log information about generated signals
+        num_buy_signals = df_with_signals['buy_signal'].sum()
+        num_sell_signals = df_with_signals['sell_signal'].sum()
+        logger.info(f"Generated {num_buy_signals} buy and {num_sell_signals} sell signals from {len(df_with_signals)} data points")
+        
+        return df_with_signals
+    
+    def _preprocess_dataframe(self, data):
+        """
+        Prepares DataFrame with shifted and calculated indicators needed for pattern evaluation.
+        Optimizes performance by minimizing DataFrame fragmentation.
+        
+        Args:
+            data: DataFrame with OHLCV and technical indicators
             
-            # Erstelle Kopie des DataFrames
-            data = df.copy()
-            
-            # Initialisiere Signalspalten
-            data['buy_signal'] = False
-            data['sell_signal'] = False
-            data['buy_strength'] = 0.0
-            data['sell_strength'] = 0.0
-            
-            # Vorverarbeitung für Indikatorvergleiche (z.B. MACD_hist_prev)
-            data = self._preprocess_dataframe(data)
-            
-            # Wende das Pattern an, um die Signalstärken zu berechnen
-            self._apply_pattern_conditions(data)
-            
-            # Generiere finale Kauf- und Verkaufssignale basierend auf der Signalstärke
-            data['buy_signal'] = data['buy_strength'] >= self.signal_threshold
-            data['sell_signal'] = data['sell_strength'] >= self.signal_threshold
-            
-            # Keine Kaufsignale, wenn gleichzeitig auch ein Verkaufssignal vorliegt
-            data.loc[data['sell_signal'], 'buy_signal'] = False
-            
-            # Logge Anzahl der generierten Signale
-            num_signals = data['buy_signal'].sum() + data['sell_signal'].sum()
-            logger.info(f"Hochfrequenz-Handelssignale generiert: {num_signals} Signale.")
-            
+        Returns:
+            DataFrame with additional indicators for pattern evaluation
+        """
+        if data.empty:
             return data
             
-        except Exception as e:
-            logger.error(f"Fehler bei der Signalgenerierung: {e}")
-            return df
-    
-    def _preprocess_dataframe(self, data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Bereitet den DataFrame für die Pattern-Auswertung vor, indem zusätzliche
-        verschobene Spalten für Vergleiche eingefügt werden.
-        
-        Args:
-            data: Der zu verarbeitende DataFrame
-            
-        Returns:
-            DataFrame mit hinzugefügten Spalten
-        """
-        # Erstelle eine Kopie, um Fragmentierung zu vermeiden
+        # Create a copy to avoid modifying the original dataframe
         data_copy = data.copy()
         
-        # Dictionary zum Sammeln aller neuen Spalten
+        # Create dictionary to hold all new columns
         new_columns = {}
         
-        # Füge verschobene Versionen wichtiger Indikatoren hinzu
-        for col in data.columns:
-            # Überspringe bereits vorhandene verschobene Spalten
-            if col.endswith('_prev'):
-                continue
-                
-            # Erstelle verschobene Versionen der Spalten
-            new_columns[f'{col}_prev'] = data_copy[col].shift(1)
-            new_columns[f'{col}_prev2'] = data_copy[col].shift(2)
+        # Add shifted versions of key indicators for comparison
+        for indicator in ['close', 'high', 'low', 'open', 'volume', 'rsi', 'macd_hist']:
+            if indicator in data_copy.columns:
+                # Previous value (t-1)
+                new_columns[f'{indicator}_prev'] = data_copy[indicator].shift(1)
+                # Previous value (t-2) for some indicators
+                if indicator in ['close', 'high', 'low', 'rsi', 'macd_hist']:
+                    new_columns[f'{indicator}_prev2'] = data_copy[indicator].shift(2)
         
-        # Berechne MA-Versionen von Spalten, die häufig benötigt werden
-        key_columns = ['volume', 'atr', 'rsi', 'macd_hist', 'bb_width']
-        for col in key_columns:
-            if col in data_copy.columns:
-                # MA mit verschiedenen Zeitfenstern
-                for period in [5, 10, 20]:
-                    new_columns[f'{col}_ma{period}'] = data_copy[col].rolling(window=period).mean()
+        # Calculate SMA values that might be needed
+        for period in [5, 10, 20, 50]:
+            if 'close' in data_copy.columns:
+                new_columns[f'sma_{period}'] = data_copy['close'].rolling(window=period).mean()
+            if 'volume' in data_copy.columns:
+                new_columns[f'volume_sma_{period}'] = data_copy['volume'].rolling(window=period).mean()
         
-        # Berechne Min/Max über Zeitfenster
-        for col in ['high', 'low', 'close']:
-            if col in data_copy.columns:
-                # Min/Max mit verschiedenen Zeitfenstern
-                for period in [10, 20, 50]:
-                    new_columns[f'{col}_min{period}'] = data_copy[col].rolling(window=period).min()
-                    new_columns[f'{col}_max{period}'] = data_copy[col].rolling(window=period).max()
+        # Add previous SMA values for comparison
+        if 'close' in data_copy.columns:
+            sma5 = data_copy['close'].rolling(window=5).mean()
+            new_columns['sma_5'] = sma5
+            new_columns['sma_5_prev'] = sma5.shift(1)
         
-        # Füge alle neuen Spalten auf einmal hinzu
-        if new_columns:
-            result = pd.concat([data_copy, pd.DataFrame(new_columns, index=data_copy.index)], axis=1)
-            return result
+        # Min/Max values over periods
+        for period in [10, 20]:
+            if 'high' in data_copy.columns:
+                new_columns[f'high_max{period}'] = data_copy['high'].rolling(window=period).max()
+            if 'low' in data_copy.columns:
+                new_columns[f'low_min{period}'] = data_copy['low'].rolling(window=period).min()
+        
+        # Add unrealized PnL placeholder column (to be filled during evaluation)
+        new_columns['unrealized_pnl_pct'] = pd.Series(0.0, index=data_copy.index)
+        
+        # Add all new columns to the dataframe at once
+        data_copy = pd.concat([data_copy, pd.DataFrame(new_columns, index=data_copy.index)], axis=1)
         
         return data_copy
     
-    def _apply_pattern_conditions(self, data: pd.DataFrame) -> None:
+    def _apply_pattern_conditions(self, data):
         """
-        Wendet die Bedingungen aus dem Pattern an, um Kauf- und Verkaufssignalstärken zu berechnen.
+        Applies the buy and sell conditions from the loaded pattern to calculate
+        strengths based on weighted conditions.
         
         Args:
-            data: Der DataFrame, auf den die Pattern-Bedingungen angewendet werden sollen
-        """
-        try:
-            # --- 1. Kaufbedingungen anwenden ---
-            if "buy_conditions" in self.pattern:
-                buy_strength = pd.Series(0.0, index=data.index)
-                
-                # Gesamtgewicht für die Normalisierung
-                total_buy_weight = sum(cond.get("weight", 1.0) for cond in self.pattern["buy_conditions"])
-                
-                # Jede Kaufbedingung auswerten
-                for condition_group in self.pattern["buy_conditions"]:
-                    conditions = condition_group.get("conditions", [])
-                    weight = condition_group.get("weight", 1.0)
-                    
-                    # Erstelle eine Maske, die True ist, wenn alle Unterbedingungen erfüllt sind
-                    mask = pd.Series(True, index=data.index)
-                    
-                    # Jede einzelne Bedingung prüfen
-                    for subcond in conditions:
-                        submask = self._evaluate_condition(data, subcond)
-                        mask = mask & submask
-                    
-                    # Addiere das Gewicht zur Signalstärke, wo die Bedingung erfüllt ist
-                    buy_strength = buy_strength + mask.astype(float) * weight
-                
-                # Normalisiere die Signalstärke (0-10 Skala)
-                data['buy_strength'] = (buy_strength / total_buy_weight * 10).round(2)
-            
-            # --- 2. Verkaufsbedingungen anwenden ---
-            if "sell_conditions" in self.pattern:
-                sell_strength = pd.Series(0.0, index=data.index)
-                
-                # Gesamtgewicht für die Normalisierung
-                total_sell_weight = sum(cond.get("weight", 1.0) for cond in self.pattern["sell_conditions"])
-                
-                # Jede Verkaufsbedingung auswerten
-                for condition_group in self.pattern["sell_conditions"]:
-                    conditions = condition_group.get("conditions", [])
-                    weight = condition_group.get("weight", 1.0)
-                    
-                    # Erstelle eine Maske, die True ist, wenn alle Unterbedingungen erfüllt sind
-                    mask = pd.Series(True, index=data.index)
-                    
-                    # Jede einzelne Bedingung prüfen
-                    for subcond in conditions:
-                        submask = self._evaluate_condition(data, subcond)
-                        mask = mask & submask
-                    
-                    # Addiere das Gewicht zur Signalstärke, wo die Bedingung erfüllt ist
-                    sell_strength = sell_strength + mask.astype(float) * weight
-                
-                # Normalisiere die Signalstärke (0-10 Skala)
-                data['sell_strength'] = (sell_strength / total_sell_weight * 10).round(2)
-                
-        except Exception as e:
-            logger.error(f"Fehler beim Anwenden der Pattern-Bedingungen: {e}")
-    
-    def _evaluate_condition(self, data: pd.DataFrame, condition: Dict[str, Any]) -> pd.Series:
-        """
-        Wertet eine einzelne Bedingung aus dem Pattern aus.
-        
-        Args:
-            data: Der DataFrame mit den Indikatoren
-            condition: Die zu prüfende Bedingung
+            data: DataFrame with preprocessed indicators
             
         Returns:
-            Eine boolesche Series, die angibt, wo die Bedingung erfüllt ist
+            DataFrame with buy_strength and sell_strength columns
         """
-        try:
-            indicator = condition["indicator"]
-            op = self.operator_map[condition["operator"]]
+        if not data.empty:
+            buy_weights_sum = 0
+            sell_weights_sum = 0
             
-            # Prüfe, ob der Indikator im DataFrame vorhanden ist
-            if indicator not in data.columns:
-                logger.warning(f"Indikator '{indicator}' nicht im DataFrame vorhanden")
-                return pd.Series(False, index=data.index)
+            # Initialize buy and sell strength columns
+            data['buy_strength'] = 0.0
+            data['sell_strength'] = 0.0
             
-            left_operand = data[indicator]
+            # Process buy conditions
+            for condition in self.pattern.get('buy_conditions', []):
+                weight = condition.get('weight', 1.0)
+                buy_weights_sum += weight
+                
+                # Check if condition is in the new simplified format
+                if 'indicator' in condition and 'conditions' not in condition:
+                    condition_result = self._evaluate_simple_condition(data, condition)
+                # Check if this is a composite condition (with sub-conditions)
+                elif 'conditions' in condition:
+                    sub_results = []
+                    for sub_condition in condition['conditions']:
+                        sub_weight = sub_condition.get('weight', 1.0)
+                        # Apply the sub condition result
+                        sub_result = self._evaluate_simple_condition(data, sub_condition)
+                        sub_results.append(sub_result * sub_weight)
+                    
+                    # Calculate weighted average of sub-conditions
+                    sub_weights_sum = sum(sub_condition.get('weight', 1.0) for sub_condition in condition['conditions'])
+                    if sub_weights_sum > 0:
+                        condition_result = sum(sub_results) / sub_weights_sum
+                    else:
+                        condition_result = 0
+                else:
+                    logger.warning(f"Unsupported condition format in buy conditions: {condition}")
+                    continue
+                    
+                # Apply the weight to the condition result and add to strength
+                data['buy_strength'] += condition_result * weight
             
-            # Bestimme den rechten Operanden basierend auf den verschiedenen Bedingungstypen
-            if "value" in condition:
-                # Direkter Wertvergleich (z.B. RSI < 30)
-                right_operand = condition["value"]
+            # Process sell conditions
+            for condition in self.pattern.get('sell_conditions', []):
+                weight = condition.get('weight', 1.0)
+                sell_weights_sum += weight
                 
-            elif "value_indicator" in condition:
-                # Vergleich mit einem anderen Indikator (z.B. close < bb_upper)
-                value_indicator = condition["value_indicator"]
-                if value_indicator not in data.columns:
-                    logger.warning(f"Vergleichsindikator '{value_indicator}' nicht im DataFrame vorhanden")
-                    return pd.Series(False, index=data.index)
-                right_operand = data[value_indicator]
+                # Check if condition is in the new simplified format
+                if 'indicator' in condition and 'conditions' not in condition:
+                    condition_result = self._evaluate_simple_condition(data, condition)
+                # Check if this is a composite condition (with sub-conditions)
+                elif 'conditions' in condition:
+                    sub_results = []
+                    for sub_condition in condition['conditions']:
+                        sub_weight = sub_condition.get('weight', 1.0)
+                        # Apply the sub condition result
+                        sub_result = self._evaluate_simple_condition(data, sub_condition)
+                        sub_results.append(sub_result * sub_weight)
+                    
+                    # Calculate weighted average of sub-conditions
+                    sub_weights_sum = sum(sub_condition.get('weight', 1.0) for sub_condition in condition['conditions'])
+                    if sub_weights_sum > 0:
+                        condition_result = sum(sub_results) / sub_weights_sum
+                    else:
+                        condition_result = 0
+                else:
+                    logger.warning(f"Unsupported condition format in sell conditions: {condition}")
+                    continue
                 
-            elif "indicator_prev" in condition:
-                # Vergleich mit verschobener Version des gleichen Indikators (z.B. close > close_prev)
-                prev_indicator = condition["indicator_prev"]
-                if prev_indicator not in data.columns and f"{prev_indicator}_prev" in data.columns:
-                    prev_indicator = f"{prev_indicator}_prev"
-                elif prev_indicator not in data.columns:
-                    logger.warning(f"Vorheriger Indikator '{prev_indicator}' nicht im DataFrame vorhanden")
-                    return pd.Series(False, index=data.index)
-                right_operand = data[prev_indicator]
+                # Apply the weight to the condition result and add to strength
+                data['sell_strength'] += condition_result * weight
+            
+            # Normalize buy and sell strengths based on total weights
+            if buy_weights_sum > 0:
+                data['buy_strength'] = data['buy_strength'] / buy_weights_sum
+            if sell_weights_sum > 0:
+                data['sell_strength'] = data['sell_strength'] / sell_weights_sum
                 
-            elif "indicator_prev2" in condition:
-                # Vergleich mit zweifach verschobener Version (z.B. close > close_prev2)
-                prev2_indicator = condition["indicator_prev2"]
-                if prev2_indicator not in data.columns and f"{prev2_indicator}_prev2" in data.columns:
-                    prev2_indicator = f"{prev2_indicator}_prev2"
-                elif prev2_indicator not in data.columns:
-                    logger.warning(f"Vorheriger Indikator (2) '{prev2_indicator}' nicht im DataFrame vorhanden")
-                    return pd.Series(False, index=data.index)
-                right_operand = data[prev2_indicator]
+            logger.debug(f"Applied pattern conditions - Buy strength max: {data['buy_strength'].max()}, "
+                        f"Sell strength max: {data['sell_strength'].max()}")
+        
+        return data
+    
+    def _evaluate_simple_condition(self, data, condition):
+        """
+        Evaluates a simple condition against the dataframe.
+        
+        Args:
+            data: DataFrame with indicators
+            condition: Condition dictionary with indicator, operator, and value/value_indicator
+            
+        Returns:
+            Series with boolean results (1 for True, 0 for False)
+        """
+        # Get the indicator name and check if it's in the dataframe
+        indicator = condition.get('indicator')
+        if indicator not in data.columns:
+            logger.warning(f"Indicator '{indicator}' not found in DataFrame")
+            return pd.Series(0, index=data.index)
+        
+        # Get the operator function
+        op_str = condition.get('operator')
+        if op_str not in self.operator_map:
+            logger.warning(f"Operator '{op_str}' not supported")
+            return pd.Series(0, index=data.index)
+        
+        op_func = self.operator_map[op_str]
+        
+        # Determine the comparison value
+        if 'value' in condition:
+            # Direct value comparison (e.g., RSI < 30)
+            value = condition.get('value')
+            result = op_func(data[indicator], value)
+        elif 'indicator_compare' in condition:
+            # Compare with another indicator (e.g., close > sma_20)
+            compare_indicator = condition.get('indicator_compare')
+            if compare_indicator not in data.columns:
+                logger.warning(f"Comparison indicator '{compare_indicator}' not found in DataFrame")
+                return pd.Series(0, index=data.index)
+            
+            # Apply optional factor (e.g., volume > volume_sma_20 * 1.5)
+            factor = condition.get('factor', 1.0)
+            result = op_func(data[indicator], data[compare_indicator] * factor)
+        else:
+            logger.warning(f"Condition must have either 'value' or 'indicator_compare': {condition}")
+            return pd.Series(0, index=data.index)
+        
+        # Convert boolean result to 1.0 or 0.0
+        return result.astype(float)
+    
+    def should_buy(self, df, position=None):
+        """
+        Determines whether to buy based on generated signals and current market conditions.
+        
+        Args:
+            df: DataFrame with signals
+            position: Optional current position information
+            
+        Returns:
+            tuple: (buy_decision, signal_strength)
+        """
+        if df.empty:
+            return False, 0.0
+            
+        # Get the latest data point
+        latest = df.iloc[-1]
+        
+        # Check if we already have the maximum number of positions
+        if position is not None and len(position) >= self.max_positions:
+            return False, 0.0
+            
+        # Check for buy signal
+        if latest.get('buy_signal', 0) > 0:
+            # Get signal strength as confidence indicator
+            signal_strength = latest.get('buy_strength', 0.0)
+            
+            # Additional conditions for buy confirmation
+            if self.volatility_adjustment:
+                # Check if volatility is acceptable
+                atr = latest.get('atr', 0)
+                close = latest.get('close', 0)
                 
-            elif "indicator_ma" in condition:
-                # Vergleich mit gleitendem Durchschnitt (z.B. volume > volume_ma10)
-                ma_indicator = condition["indicator_ma"]
-                ma_period = condition.get("ma_period", 20)
+                if close > 0 and atr > 0:
+                    # Calculate volatility as percentage of price
+                    volatility_pct = (atr / close) * 100
+                    
+                    # If volatility is too high, reduce signal strength
+                    if volatility_pct > 5.0:  # 5% volatility threshold
+                        signal_strength *= 0.5
+                    
+            # Machine learning confirmation if enabled
+            if self.use_ml_predictions and 'ml_prediction' in latest:
+                ml_prediction = latest.get('ml_prediction', 0)
                 
-                ma_col = f"{ma_indicator}_ma{ma_period}"
-                if ma_col not in data.columns:
-                    # Berechne MA, wenn noch nicht vorhanden
-                    data[ma_col] = data[ma_indicator].rolling(window=ma_period).mean()
+                # If ML predicts negative, reduce signal strength
+                if ml_prediction < 0:
+                    signal_strength *= 0.5
+                # If ML strongly predicts positive, boost signal strength
+                elif ml_prediction > 0.5:
+                    signal_strength *= 1.5
+            
+            return signal_strength >= self.signal_threshold / 10, signal_strength
+            
+        return False, 0.0
+        
+    def should_sell(self, df, position=None):
+        """
+        Determines whether to sell based on generated signals and current market conditions.
+        
+        Args:
+            df: DataFrame with signals
+            position: Optional current position information
+            
+        Returns:
+            tuple: (sell_decision, signal_strength)
+        """
+        if df.empty:
+            return False, 0.0
+            
+        # Get the latest data point
+        latest = df.iloc[-1]
+        
+        # If no position, nothing to sell
+        if position is None:
+            return False, 0.0
+            
+        # Check for sell signal
+        if latest.get('sell_signal', 0) > 0:
+            # Get signal strength as confidence indicator
+            signal_strength = latest.get('sell_strength', 0.0)
+            
+            # Additional conditions or risk management rules can be added here
+            
+            # Machine learning confirmation if enabled
+            if self.use_ml_predictions and 'ml_prediction' in latest:
+                ml_prediction = latest.get('ml_prediction', 0)
                 
-                right_operand = data[ma_col]
-                
-                # Optionaler Faktor für den Vergleich (z.B. volume > volume_ma10 * 1.5)
-                if "factor" in condition:
-                    right_operand = right_operand * condition["factor"]
-                
-            elif "indicator_max" in condition:
-                # Vergleich mit Maximum über einen Zeitraum (z.B. close > high_max20)
-                max_indicator = condition["indicator_max"]
-                period = condition.get("period", 20)
-                offset = condition.get("offset", 0)
-                
-                max_col = f"{max_indicator}_max{period}"
-                if max_col not in data.columns:
-                    # Berechne Max, wenn noch nicht vorhanden
-                    data[max_col] = data[max_indicator].rolling(window=period).max().shift(offset)
-                
-                right_operand = data[max_col]
-                
-                # Optionaler Faktor für den Vergleich
-                if "factor" in condition:
-                    right_operand = right_operand * condition["factor"]
-                
-            elif "indicator_min" in condition:
-                # Vergleich mit Minimum über einen Zeitraum (z.B. close < low_min20)
-                min_indicator = condition["indicator_min"]
-                period = condition.get("period", 20)
-                offset = condition.get("offset", 0)
-                
-                min_col = f"{min_indicator}_min{period}"
-                if min_col not in data.columns:
-                    # Berechne Min, wenn noch nicht vorhanden
-                    data[min_col] = data[min_indicator].rolling(window=period).min().shift(offset)
-                
-                right_operand = data[min_col]
-                
-                # Optionaler Faktor für den Vergleich
-                if "factor" in condition:
-                    right_operand = right_operand * condition["factor"]
-                
+                # If ML predicts positive, reduce sell signal strength
+                if ml_prediction > 0:
+                    signal_strength *= 0.7
+                # If ML strongly predicts negative, boost sell signal
+                elif ml_prediction < -0.5:
+                    signal_strength *= 1.5
+            
+            return signal_strength >= self.signal_threshold / 10, signal_strength
+            
+        return False, 0.0
+
+    def evaluate_position(self, position, current_data):
+        """
+        Evaluates an existing position and updates its status based on current market data.
+        
+        Args:
+            position: The position to evaluate
+            current_data: Current market data (Series or DataFrame)
+            
+        Returns:
+            tuple: (recommendation, reason)
+                recommendation: One of HOLD, SELL, REDUCE
+                reason: String explaining the recommendation
+        """
+        if position is None or current_data is None:
+            return PositionStatus.HOLD, "Insufficient data for evaluation"
+        
+        # Ensure current_data is a Series (not a DataFrame)
+        if isinstance(current_data, pd.DataFrame):
+            if current_data.empty:
+                return PositionStatus.HOLD, "Empty data for evaluation"
+            if len(current_data) == 1:
+                latest = current_data.iloc[0]
             else:
-                logger.warning(f"Unbekannter Bedingungstyp: {condition}")
-                return pd.Series(False, index=data.index)
-            
-            # Führe den Vergleich durch und gib das Ergebnis zurück
-            return op(left_operand, right_operand)
-            
-        except Exception as e:
-            logger.error(f"Fehler bei der Auswertung einer Bedingung: {e} - {condition}")
-            return pd.Series(False, index=data.index)
-    
-    def should_buy(self, df: pd.DataFrame, position: Optional[Dict] = None) -> Tuple[bool, float]:
-        """
-        Entscheidet, ob gekauft werden soll, basierend auf den generierten Signalen.
+                logger.warning(f"Multiple rows in current_data for position evaluation. Using first row.")
+                latest = current_data.iloc[0]
+        else:
+            # current_data is already a Series
+            latest = current_data
         
-        Args:
-            df: DataFrame mit Signalen
-            position: Aktuell gehaltene Position (falls vorhanden)
-            
-        Returns:
-            Tuple aus (Kaufen-ja/nein, Signalstärke)
-        """
-        try:
-            # Keine Käufe, wenn bereits eine Position besteht
-            if position is not None:
-                return False, 0.0
-            
-            # Bei leerem DataFrame nicht kaufen
-            if df.empty:
-                return False, 0.0
-            
-            # Verwende den letzten Datenpunkt
-            last_data = df.iloc[-1]
-            
-            # Prüfe, ob ein Kaufsignal vorliegt
-            should_buy = bool(last_data.get('buy_signal', False))
-            
-            # Signalstärke zwischen 0 und 10
-            signal_strength = float(last_data.get('buy_strength', 0.0))
-            
-            return should_buy, signal_strength
-            
-        except Exception as e:
-            logger.error(f"Fehler bei der Kaufentscheidung: {e}")
-            return False, 0.0
-    
-    def should_sell(self, df: pd.DataFrame, position: Optional[Dict] = None) -> Tuple[bool, float]:
-        """
-        Entscheidet, ob verkauft werden soll, basierend auf den generierten Signalen.
+        symbol = position.symbol
         
-        Args:
-            df: DataFrame mit Signalen
-            position: Aktuell gehaltene Position
-            
-        Returns:
-            Tuple aus (Verkaufen-ja/nein, Signalstärke)
-        """
-        try:
-            # Keine Position zum Verkaufen
-            if position is None:
-                return False, 0.0
-            
-            # Bei leerem DataFrame nicht verkaufen
-            if df.empty:
-                return False, 0.0
-            
-            # Verwende den letzten Datenpunkt
-            last_data = df.iloc[-1]
-            
-            # Prüfe, ob ein Verkaufssignal vorliegt
-            should_sell = bool(last_data.get('sell_signal', False))
-            
-            # Signalstärke zwischen 0 und 10
-            signal_strength = float(last_data.get('sell_strength', 0.0))
-            
-            # Trailing Stop-Loss für Gewinnmitnahme
-            if position and 'entry_price' in position and 'current_price' in position:
-                entry_price = position['entry_price']
-                current_price = position['current_price']
-                
-                # Wenn Position im Gewinn ist
-                if current_price > entry_price:
-                    # Berechne maximalen Gewinn
-                    if 'highest_price' in position:
-                        highest_price = position['highest_price']
-                        
-                        # Wenn Preis vom Höchststand um x% gefallen ist
-                        trailing_stop_price = highest_price * (1 - self.trailing_stop_pct / 100)
-                        if current_price <= trailing_stop_price:
-                            logger.info(f"Trailing-Stop ausgelöst: {current_price} <= {trailing_stop_price}")
-                            should_sell = True
-                            signal_strength = 10.0  # Höchste Priorität
-            
-            # Schutz vor zu großem Drawdown
-            if position and 'entry_price' in position and 'current_price' in position:
-                entry_price = position['entry_price']
-                current_price = position['current_price']
-                
-                # Berechne aktuellen Verlust in Prozent
-                loss_pct = (entry_price - current_price) / entry_price * 100
-                
-                # Wenn Verlust größer als erlaubter Drawdown ist
-                if loss_pct >= self.max_drawdown_pct:
-                    logger.info(f"Max-Drawdown-Schutz ausgelöst: {loss_pct:.2f}% Verlust")
-                    should_sell = True
-                    signal_strength = 10.0  # Höchste Priorität
-            
-            return should_sell, signal_strength
-            
-        except Exception as e:
-            logger.error(f"Fehler bei der Verkaufsentscheidung: {e}")
-            return False, 0.0
-
-    def evaluate_position(self, position: Dict, current_data: pd.Series) -> Dict:
-        """
-        Evaluiert eine bestehende Position und aktualisiert deren Status.
+        # Calculate current unrealized profit/loss as a percentage
+        if position.current_price is None or position.current_price == 0:
+            position.current_price = latest['close']
         
-        Args:
-            position: Dictionary mit Positionsdaten
-            current_data: Aktuelle Marktdaten als pandas Series
+        unrealized_pnl_pct = ((latest['close'] - position.entry_price) / position.entry_price * 100) 
+        if hasattr(position, 'direction') and position.direction == 'short':
+            unrealized_pnl_pct = -unrealized_pnl_pct
+        
+        # Calculate time in position (in hours)
+        hours_in_position = 0
+        if position.entry_time is not None:
+            current_time = pd.Timestamp.now()
+            hours_in_position = (current_time - position.entry_time).total_seconds() / 3600
+        
+        # Take profit check using the pattern's take_profit_pct
+        if unrealized_pnl_pct >= self.take_profit_pct:
+            return PositionStatus.SELL, f"Take profit target reached: {unrealized_pnl_pct:.2f}% >= {self.take_profit_pct:.2f}%"
+        
+        # Stop loss check using the pattern's stop_loss_pct
+        if unrealized_pnl_pct <= -self.stop_loss_pct:
+            return PositionStatus.SELL, f"Stop loss triggered: {unrealized_pnl_pct:.2f}% <= -{self.stop_loss_pct:.2f}%"
+        
+        # Maximum trade duration check
+        if hours_in_position >= self.max_trade_duration:
+            return PositionStatus.SELL, f"Maximum trade duration reached: {hours_in_position:.1f} hours >= {self.max_trade_duration} hours"
+        
+        # Get trailing stop level if it exists
+        trailing_stop_level = getattr(position, 'trailing_stop_level', None)
+        highest_price = getattr(position, 'highest_price', position.entry_price)
+        
+        # Update highest price if current price is higher
+        if latest['close'] > highest_price:
+            position.highest_price = latest['close']
             
-        Returns:
-            Aktualisiertes Positions-Dictionary
-        """
-        try:
-            # Wenn keine Position existiert, gib ein leeres Ergebnis zurück
-            if not position:
-                return {'should_close': False}
-
-            if not current_data.any():
-                return {'should_close': False}
-
-            # Aktualisiere Positionswerte
-            current_price = float(current_data['close'])
-            position['current_price'] = current_price
-            
-            # Aktualisiere Höchstpreis für Trailing-Stop
-            if 'highest_price' not in position:
-                position['highest_price'] = current_price
-            elif current_price > position['highest_price']:
-                position['highest_price'] = current_price
-            
-            # Berechne aktuelle P&L
-            entry_price = float(position['entry_price'])
-            quantity = float(position['size'])
-            position['unrealized_pnl'] = (current_price - entry_price) * quantity
-            position['unrealized_pnl_pct'] = (current_price - entry_price) / entry_price * 100
-            
-            # Prüfe Trailing-Stop
-            if position['highest_price'] > entry_price:
-                trailing_stop_price = position['highest_price'] * (1 - self.trailing_stop_pct / 100)
-                position['trailing_stop'] = trailing_stop_price
+            # Calculate new trailing stop level
+            if self.trailing_stop_pct > 0:
+                position.trailing_stop_level = position.highest_price * (1 - self.trailing_stop_pct / 100)
+                logger.debug(f"Updated trailing stop for {symbol} to {position.trailing_stop_level}")
                 
-                if current_price <= trailing_stop_price:
-                    position['should_close'] = True
-                    position['close_reason'] = 'trailing_stop'
-                    return position
+        # Check if trailing stop is triggered
+        if (trailing_stop_level is not None and 
+            position.trailing_stop_level is not None and 
+            latest['close'] < position.trailing_stop_level):
+            return PositionStatus.SELL, f"Trailing stop triggered at {position.trailing_stop_level}"
+        
+        # Check for sell signals based on our indicators
+        if isinstance(latest, pd.Series) and 'sell_signal' in latest:
+            if latest.get('sell_signal', 0) > 0:
+                return PositionStatus.SELL, "Sell signal generated by strategy"
             
-            # Prüfe maximalen Drawdown
-            if position['unrealized_pnl_pct'] <= -self.max_drawdown_pct:
-                position['should_close'] = True
-                position['close_reason'] = 'max_drawdown'
-                return position
-            
-            # Prüfe Verkaufssignal
-            should_sell, sell_strength = self.should_sell(pd.DataFrame([current_data]), position)
-            if should_sell:
-                position['should_close'] = True
-                position['close_reason'] = 'sell_signal'
-                position['signal_strength'] = sell_strength
-                return position
-            
-            # Position bleibt offen
-            position['should_close'] = False
-            return position
-            
-        except Exception as e:
-            logger.error(f"Fehler bei der Positionsevaluierung: {e}")
-            return {'should_close': False, 'error': str(e)}
+        # Default to holding the position
+        return PositionStatus.HOLD, "No exit criteria met"

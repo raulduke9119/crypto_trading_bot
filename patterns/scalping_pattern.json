@@ -1,0 +1,182 @@
+{
+    "name": "Scalping Pattern",
+    "description": "A high-frequency trading pattern optimized for short timeframes (1m-5m)",
+    "version": "1.0",
+    "signal_threshold": 2.8,
+    "risk_params": {
+        "take_profit_pct": 0.5,
+        "stop_loss_pct": 0.3,
+        "max_trade_duration": 8,
+        "trailing_stop_pct": 0.4,
+        "max_drawdown_pct": 1.0,
+        "position_sizing": "risk_adjusted"
+    },
+    "buy_conditions": [
+        {
+            "name": "Price Momentum",
+            "description": "Short-term price momentum",
+            "indicator": "close",
+            "operator": ">",
+            "indicator_compare": "sma_5",
+            "weight": 1.0
+        },
+        {
+            "name": "RSI Recovery",
+            "description": "RSI recovering from oversold conditions",
+            "conditions": [
+                {
+                    "indicator": "rsi",
+                    "operator": ">",
+                    "indicator_compare": "rsi_prev",
+                    "weight": 0.8
+                },
+                {
+                    "indicator": "rsi",
+                    "operator": "<",
+                    "value": 50,
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.2
+        },
+        {
+            "name": "Volume Confirmation",
+            "description": "Increasing volume on price moves",
+            "indicator": "volume",
+            "operator": ">",
+            "indicator_compare": "volume_prev",
+            "factor": 1.2,
+            "weight": 1.0
+        },
+        {
+            "name": "MACD Histogram Increase",
+            "description": "MACD histogram increasing (momentum)",
+            "indicator": "macd_hist",
+            "operator": ">",
+            "indicator_compare": "macd_hist_prev",
+            "weight": 1.0
+        },
+        {
+            "name": "Bollinger Band Bounce",
+            "description": "Price bouncing off lower Bollinger Band",
+            "conditions": [
+                {
+                    "indicator": "low_prev",
+                    "operator": "<",
+                    "indicator_compare": "bb_lower_prev",
+                    "factor": 1.005,
+                    "weight": 0.8
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "bb_lower",
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.1
+        },
+        {
+            "name": "Fast MA Cross",
+            "description": "Very fast MA crosses above slightly slower MA",
+            "conditions": [
+                {
+                    "indicator": "ema_5",
+                    "operator": ">",
+                    "indicator_compare": "ema_10",
+                    "weight": 0.9
+                },
+                {
+                    "indicator": "ema_5_prev",
+                    "operator": "<",
+                    "indicator_compare": "ema_10_prev",
+                    "weight": 0.6
+                }
+            ],
+            "weight": 0.9
+        }
+    ],
+    "sell_conditions": [
+        {
+            "name": "Quick Profit",
+            "description": "Take quick profits",
+            "indicator": "unrealized_pnl_pct",
+            "operator": ">=",
+            "value": 0.4,
+            "weight": 2.0
+        },
+        {
+            "name": "Momentum Loss",
+            "description": "Price momentum slowing",
+            "indicator": "close",
+            "operator": "<",
+            "indicator_compare": "sma_5",
+            "weight": 1.0
+        },
+        {
+            "name": "RSI Pullback",
+            "description": "RSI pulling back from higher levels",
+            "conditions": [
+                {
+                    "indicator": "rsi",
+                    "operator": "<",
+                    "indicator_compare": "rsi_prev",
+                    "weight": 0.8
+                },
+                {
+                    "indicator": "rsi",
+                    "operator": ">",
+                    "value": 60,
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.2
+        },
+        {
+            "name": "Volume Decline",
+            "description": "Volume declining on up moves",
+            "conditions": [
+                {
+                    "indicator": "volume",
+                    "operator": "<",
+                    "indicator_compare": "volume_prev",
+                    "weight": 0.8
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "close_prev",
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.0
+        },
+        {
+            "name": "MACD Histogram Decrease",
+            "description": "MACD histogram decreasing (momentum loss)",
+            "indicator": "macd_hist",
+            "operator": "<",
+            "indicator_compare": "macd_hist_prev",
+            "weight": 1.0
+        },
+        {
+            "name": "Fast MA Cross Down",
+            "description": "Very fast MA crosses below slightly slower MA",
+            "conditions": [
+                {
+                    "indicator": "ema_5",
+                    "operator": "<",
+                    "indicator_compare": "ema_10",
+                    "weight": 0.9
+                },
+                {
+                    "indicator": "ema_5_prev",
+                    "operator": ">",
+                    "indicator_compare": "ema_10_prev",
+                    "weight": 0.6
+                }
+            ],
+            "weight": 0.9
+        }
+    ]
+} 

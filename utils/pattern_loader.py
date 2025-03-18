@@ -264,40 +264,82 @@ class PatternLoader:
             # Überprüfe erforderliche Schlüssel
             required_keys = ["name", "buy_conditions", "sell_conditions", "signal_threshold"]
             if not all(key in pattern for key in required_keys):
-                logger.error(f"Pattern fehlen erforderliche Schlüssel: {required_keys}")
+                logger.error(f"Pattern fehlen erforderliche Schlüssel: {[k for k in required_keys if k not in pattern]}")
                 return False
-                
-            # Validiere Buy-Conditions
+            
+            # Validiere Buy-Conditions - Unterstützt beide Formate (einfach und komplex)
             for condition in pattern["buy_conditions"]:
-                if not all(key in condition for key in ["name", "conditions", "weight"]):
-                    logger.error(f"Buy-Condition fehlen erforderliche Schlüssel: name, conditions, weight")
+                # Alle Bedingungen müssen einen Namen und ein Gewicht haben
+                if not all(key in condition for key in ["name", "weight"]):
+                    logger.error(f"Buy-Condition fehlen erforderliche Schlüssel: name, weight")
                     return False
-                    
-                # Validiere einzelne Bedingungen
-                for subcond in condition["conditions"]:
-                    if not all(key in subcond for key in ["indicator", "operator"]):
-                        logger.error(f"Condition fehlen erforderliche Schlüssel: indicator, operator")
+                
+                # Format 1: Direktes Format (ein Indikator direkt in der Bedingung)
+                if "indicator" in condition:
+                    # Bei direktem Format: Indikator und Operator müssen vorhanden sein
+                    if "operator" not in condition:
+                        logger.error(f"Buy-Condition benötigt 'operator' im direkten Format")
                         return False
                     
-                    # Überprüfe, ob entweder "value" oder "value_indicator" vorhanden ist
-                    if "value" not in subcond and "value_indicator" not in subcond:
-                        logger.error(f"Condition braucht entweder 'value' oder 'value_indicator'")
+                    # Überprüfe, ob entweder "value" oder "indicator_compare" vorhanden ist
+                    if "value" not in condition and "indicator_compare" not in condition:
+                        logger.error(f"Buy-Condition benötigt entweder 'value' oder 'indicator_compare'")
                         return False
+                
+                # Format 2: Verschachteltes Format (mit Unterbedingungen in "conditions")
+                elif "conditions" in condition:
+                    # Bei verschachteltem Format: Überprüfe jede Unterbedingung
+                    for subcond in condition["conditions"]:
+                        if not all(key in subcond for key in ["indicator", "operator"]):
+                            logger.error(f"Condition fehlen erforderliche Schlüssel: indicator, operator")
+                            return False
+                        
+                        # Überprüfe, ob entweder "value" oder "value_indicator" vorhanden ist
+                        if "value" not in subcond and "value_indicator" not in subcond and "indicator_compare" not in subcond:
+                            logger.error(f"Condition braucht entweder 'value', 'value_indicator' oder 'indicator_compare'")
+                            return False
+                
+                # Wenn weder "indicator" noch "conditions" vorhanden ist, ist das Format ungültig
+                else:
+                    logger.error(f"Buy-Condition muss entweder 'indicator' oder 'conditions' enthalten")
+                    return False
             
             # Validiere Sell-Conditions (ähnlich wie bei Buy)
             for condition in pattern["sell_conditions"]:
-                if not all(key in condition for key in ["name", "conditions", "weight"]):
-                    logger.error(f"Sell-Condition fehlen erforderliche Schlüssel: name, conditions, weight")
+                # Alle Bedingungen müssen einen Namen und ein Gewicht haben
+                if not all(key in condition for key in ["name", "weight"]):
+                    logger.error(f"Sell-Condition fehlen erforderliche Schlüssel: name, weight")
                     return False
-                    
-                for subcond in condition["conditions"]:
-                    if not all(key in subcond for key in ["indicator", "operator"]):
-                        logger.error(f"Condition fehlen erforderliche Schlüssel: indicator, operator")
+                
+                # Format 1: Direktes Format (ein Indikator direkt in der Bedingung)
+                if "indicator" in condition:
+                    # Bei direktem Format: Indikator und Operator müssen vorhanden sein
+                    if "operator" not in condition:
+                        logger.error(f"Sell-Condition benötigt 'operator' im direkten Format")
                         return False
                     
-                    if "value" not in subcond and "value_indicator" not in subcond:
-                        logger.error(f"Condition braucht entweder 'value' oder 'value_indicator'")
+                    # Überprüfe, ob entweder "value" oder "indicator_compare" vorhanden ist
+                    if "value" not in condition and "indicator_compare" not in condition:
+                        logger.error(f"Sell-Condition benötigt entweder 'value' oder 'indicator_compare'")
                         return False
+                
+                # Format 2: Verschachteltes Format (mit Unterbedingungen in "conditions")
+                elif "conditions" in condition:
+                    # Bei verschachteltem Format: Überprüfe jede Unterbedingung
+                    for subcond in condition["conditions"]:
+                        if not all(key in subcond for key in ["indicator", "operator"]):
+                            logger.error(f"Condition fehlen erforderliche Schlüssel: indicator, operator")
+                            return False
+                        
+                        # Überprüfe, ob entweder "value" oder "value_indicator" vorhanden ist
+                        if "value" not in subcond and "value_indicator" not in subcond and "indicator_compare" not in subcond:
+                            logger.error(f"Condition braucht entweder 'value', 'value_indicator' oder 'indicator_compare'")
+                            return False
+                
+                # Wenn weder "indicator" noch "conditions" vorhanden ist, ist das Format ungültig
+                else:
+                    logger.error(f"Sell-Condition muss entweder 'indicator' oder 'conditions' enthalten")
+                    return False
             
             return True
             

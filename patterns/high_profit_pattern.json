@@ -1,0 +1,148 @@
+{
+    "name": "High Profit Pattern",
+    "description": "An optimized trading pattern for higher profitability with sophisticated entry/exit conditions",
+    "version": "2.0",
+    "signal_threshold": 4.0,
+    "risk_params": {
+        "take_profit_pct": 2.2,
+        "stop_loss_pct": 1.0,
+        "max_trade_duration": 48,
+        "trailing_stop_pct": 1.2,
+        "max_drawdown_pct": 3.0,
+        "position_sizing": "risk_adjusted"
+    },
+    "buy_conditions": [
+        {
+            "name": "Strong RSI Reversal",
+            "description": "RSI showing oversold conditions with reversal",
+            "indicator": "rsi",
+            "operator": "<",
+            "value": 35,
+            "weight": 1.5
+        },
+        {
+            "name": "Bullish MACD Crossover",
+            "description": "MACD Histogram crosses above zero or increases",
+            "indicator": "macd_hist",
+            "operator": ">",
+            "value": 0,
+            "weight": 1.2
+        },
+        {
+            "name": "Bullish Volume Confirmation",
+            "description": "Volume exceeds its moving average significantly",
+            "indicator": "volume",
+            "operator": ">",
+            "indicator_compare": "volume_sma_20",
+            "factor": 1.3,
+            "weight": 1.0
+        },
+        {
+            "name": "Bollinger Breakout Up",
+            "description": "Price crossing above middle Bollinger Band",
+            "indicator": "close",
+            "operator": ">",
+            "indicator_compare": "bb_middle",
+            "factor": 0.85,
+            "weight": 1.2
+        },
+        {
+            "name": "Price Above Key MAs",
+            "description": "Price above both short and medium MAs",
+            "conditions": [
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "sma_10",
+                    "weight": 0.5
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "sma_20",
+                    "weight": 0.5
+                }
+            ],
+            "weight": 1.0
+        },
+        {
+            "name": "Support Bounce",
+            "description": "Price bouncing off a support level (previous low)",
+            "indicator": "low",
+            "operator": ">",
+            "indicator_compare": "low_prev",
+            "factor": 1.001,
+            "weight": 1.0
+        },
+        {
+            "name": "Positive Price Momentum",
+            "description": "Short-term moving average moving up",
+            "indicator": "sma_5",
+            "operator": ">",
+            "indicator_compare": "sma_5_prev",
+            "factor": 1.001,
+            "weight": 1.1
+        }
+    ],
+    "sell_conditions": [
+        {
+            "name": "RSI Overbought",
+            "description": "RSI showing overbought conditions",
+            "indicator": "rsi",
+            "operator": ">",
+            "value": 70,
+            "weight": 1.5
+        },
+        {
+            "name": "Bearish MACD Crossover",
+            "description": "MACD Histogram crosses below zero or decreases",
+            "indicator": "macd_hist",
+            "operator": "<",
+            "value": 0,
+            "weight": 1.2
+        },
+        {
+            "name": "Bearish Volume Confirmation",
+            "description": "Volume exceeds its moving average significantly on downward move",
+            "indicator": "volume",
+            "operator": ">",
+            "indicator_compare": "volume_sma_20",
+            "factor": 1.3,
+            "weight": 1.0
+        },
+        {
+            "name": "Bollinger Breakout Down",
+            "description": "Price crossing below middle Bollinger Band",
+            "indicator": "close",
+            "operator": "<",
+            "indicator_compare": "bb_middle",
+            "factor": 1.0,
+            "weight": 1.2
+        },
+        {
+            "name": "Bearish Price Action",
+            "description": "Price making a lower low compared to previous bar",
+            "indicator": "low",
+            "operator": "<",
+            "indicator_compare": "low_prev",
+            "weight": 1.0
+        },
+        {
+            "name": "Profit Target",
+            "description": "Take profit when unrealized profit reaches threshold",
+            "indicator": "unrealized_pnl_pct",
+            "operator": ">",
+            "value": 1.8,
+            "weight": 2.0
+        },
+        {
+            "name": "Resistance Rejection",
+            "description": "Price being rejected at resistance (previous high)",
+            "indicator": "high",
+            "operator": "<",
+            "indicator_compare": "high_prev",
+            "factor": 0.999,
+            "weight": 1.0
+        }
+    ]
+} 

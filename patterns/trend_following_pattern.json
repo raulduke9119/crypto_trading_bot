@@ -1,0 +1,197 @@
+{
+    "name": "Trend Following Pattern",
+    "description": "A pattern designed to capture major trends with minimal noise (15m-1h timeframes)",
+    "version": "1.0",
+    "signal_threshold": 4.2,
+    "risk_params": {
+        "take_profit_pct": 3.5,
+        "stop_loss_pct": 1.5,
+        "max_trade_duration": 72,
+        "trailing_stop_pct": 2.0,
+        "max_drawdown_pct": 3.0,
+        "position_sizing": "risk_adjusted"
+    },
+    "buy_conditions": [
+        {
+            "name": "Strong Uptrend",
+            "description": "Multiple moving averages aligned in uptrend",
+            "conditions": [
+                {
+                    "indicator": "sma_20",
+                    "operator": ">",
+                    "indicator_compare": "sma_50",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "sma_50",
+                    "operator": ">",
+                    "indicator_compare": "sma_100",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "sma_20",
+                    "weight": 0.8
+                }
+            ],
+            "weight": 1.8
+        },
+        {
+            "name": "Momentum Confirmation",
+            "description": "RSI and MACD confirming uptrend momentum",
+            "conditions": [
+                {
+                    "indicator": "rsi",
+                    "operator": ">",
+                    "value": 50,
+                    "weight": 0.7
+                },
+                {
+                    "indicator": "macd",
+                    "operator": ">",
+                    "value": 0,
+                    "weight": 0.7
+                },
+                {
+                    "indicator": "macd",
+                    "operator": ">",
+                    "indicator_compare": "macd_signal",
+                    "weight": 0.6
+                }
+            ],
+            "weight": 1.5
+        },
+        {
+            "name": "Volume Trend Confirmation",
+            "description": "Volume increasing in trend direction",
+            "conditions": [
+                {
+                    "indicator": "volume",
+                    "operator": ">",
+                    "indicator_compare": "volume_sma_20",
+                    "weight": 0.8
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "open",
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.2
+        },
+        {
+            "name": "Pullback Completion",
+            "description": "Price completing a pullback to moving average",
+            "conditions": [
+                {
+                    "indicator": "low_prev",
+                    "operator": "<",
+                    "indicator_compare": "ema_20_prev",
+                    "weight": 0.7
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "ema_20",
+                    "weight": 0.8
+                }
+            ],
+            "weight": 1.3
+        },
+        {
+            "name": "ADX Strength",
+            "description": "ADX indicating strong trend",
+            "indicator": "adx",
+            "operator": ">",
+            "value": 25,
+            "weight": 1.0
+        }
+    ],
+    "sell_conditions": [
+        {
+            "name": "Trend Reversal",
+            "description": "Multiple moving averages showing trend reversal",
+            "conditions": [
+                {
+                    "indicator": "sma_20",
+                    "operator": "<",
+                    "indicator_compare": "sma_50",
+                    "weight": 1.0
+                },
+                {
+                    "indicator": "close",
+                    "operator": "<",
+                    "indicator_compare": "sma_20",
+                    "weight": 1.0
+                }
+            ],
+            "weight": 1.8
+        },
+        {
+            "name": "Momentum Weakening",
+            "description": "RSI and MACD showing weakening momentum",
+            "conditions": [
+                {
+                    "indicator": "rsi",
+                    "operator": "<",
+                    "indicator_compare": "rsi_prev",
+                    "factor": 0.95,
+                    "weight": 0.7
+                },
+                {
+                    "indicator": "macd",
+                    "operator": "<",
+                    "indicator_compare": "macd_signal",
+                    "weight": 0.8
+                }
+            ],
+            "weight": 1.5
+        },
+        {
+            "name": "Overbought Condition",
+            "description": "RSI indicating overbought levels",
+            "indicator": "rsi",
+            "operator": ">",
+            "value": 70,
+            "weight": 1.2
+        },
+        {
+            "name": "Volume Divergence",
+            "description": "Volume declining while price rising (weakness)",
+            "conditions": [
+                {
+                    "indicator": "volume",
+                    "operator": "<",
+                    "indicator_compare": "volume_sma_20",
+                    "weight": 0.8
+                },
+                {
+                    "indicator": "close",
+                    "operator": ">",
+                    "indicator_compare": "close_prev",
+                    "weight": 0.7
+                }
+            ],
+            "weight": 1.0
+        },
+        {
+            "name": "Parabolic Move",
+            "description": "Price making parabolic move (unsustainable)",
+            "indicator": "close",
+            "operator": ">",
+            "indicator_compare": "bb_upper",
+            "factor": 1.05,
+            "weight": 1.3
+        },
+        {
+            "name": "Take Substantial Profit",
+            "description": "Take profit when substantial gains achieved",
+            "indicator": "unrealized_pnl_pct",
+            "operator": ">=",
+            "value": 3.0,
+            "weight": 2.0
+        }
+    ]
+} 
