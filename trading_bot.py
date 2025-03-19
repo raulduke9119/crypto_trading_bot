@@ -90,7 +90,7 @@ class TradingBot:
         self.use_order_book = config.get('use_order_book', False)
         self.order_book_depth = config.get('order_book_depth', 10)
         self.kelly_factor = config.get('kelly_factor', 0.5)
-        self.min_trades = config.get('min_trades', 10)
+        self.min_trades_for_kelly = config.get('min_trades_for_kelly', 10)
         self.history_file = config.get('history_file', None)
         
         # Prüfe API-Schlüssel
@@ -143,7 +143,12 @@ class TradingBot:
         
         # Initialize new components
         if self.use_order_book:
-            self.order_book_manager = OrderBookManager(self.api_key, self.api_secret, self.use_testnet)
+            self.order_book_manager = OrderBookManager(
+                self.client, 
+                self.symbols,
+                update_interval=5, 
+                depth=self.order_book_depth
+            )
             logger.info("OrderBookManager initialized for liquidity analysis")
         else:
             self.order_book_manager = None
@@ -583,99 +588,115 @@ class TradingBot:
         
         return results
 
-    def _calculate_position_size(self, symbol, market_data, signal_strength=1.0):
+    def _calculate_position_size(self, symbol: str, market_data: pd.DataFrame, signal_strength: float = 1.0) -> float:
         """
-        Calculate the position size for a trade based on risk parameters.
+        Calculate position size based on account balance, current price, and signal strength.
+        Handles both live trading and backtesting cases.
         
         Args:
-            symbol: The trading symbol
-            market_data: Market data for the symbol
-            signal_strength: Strength of the trading signal (0.0 to 1.0)
+            symbol: Trading pair symbol
+            market_data: Historical market data
+            signal_strength: Signal strength from 0.5 to 1.0
             
         Returns:
-            Quantity to buy/sell
+            Quantity to trade
         """
         try:
-            # Get account balance
-            if self.use_testnet:
+            # Get current account balance (using initial_capital for backtest/paper trading)
+            if self.is_backtest or self.is_paper_trading:
                 account_balance = self.initial_capital
             else:
-                account_balance = self.order_executor.get_account_balance()['USDT']
-                
-            # Get the current price
-            current_price = market_data['close'].iloc[-1]
+                account_balance = self.order_executor.get_account_balance('USDT')
             
-            if account_balance <= 0 or current_price <= 0:
-                logger.warning(f"Invalid account balance ({account_balance}) or price ({current_price})")
+            if account_balance <= 0:
+                logger.warning(f"Invalid account balance: {account_balance}")
                 return 0
-                
-            # Check for available liquidity
-            has_liquidity = True
-            slippage = 0.0
             
-            if not self.use_testnet and self.order_book_manager:
-                # Check if there's enough liquidity and calculate potential slippage
-                has_liquidity = self.order_book_manager.is_enough_liquidity(symbol, account_balance * self.risk_percentage / 100)
-                if has_liquidity:
-                    slippage = self.order_book_manager.calculate_slippage(symbol, account_balance * self.risk_percentage / 100)
-                    # Adjust price for slippage
-                    if slippage > 0:
-                        logger.info(f"Estimated slippage for {symbol}: {slippage:.2f}%")
-                        current_price = current_price * (1 + slippage/100)
+            # Get current price from market data
+            if market_data is None or market_data.empty:
+                logger.warning(f"No market data available for {symbol}")
+                return 0
             
-            # Get optimal position size from performance tracker if available
-            if len(self.performance_tracker.trades) >= 10:
-                # Use Kelly Criterion-based position sizing
-                risk_pct = self.performance_tracker.calculate_optimal_position_size(
-                    symbol, 
-                    account_balance,
-                    risk_factor=0.5  # Half-Kelly for safety
-                )
-                logger.info(f"Using Kelly position sizing for {symbol}: {risk_pct*100:.2f}%")
+            current_price = market_data['close'].iloc[-1]
+            if current_price <= 0:
+                logger.warning(f"Invalid current price for {symbol}: {current_price}")
+                return 0
+            
+            # Check liquidity if not using testnet and not in backtest mode
+            if not self.use_testnet and not self.is_backtest:
+                if 'volume' in market_data.columns:
+                    # Volume in base asset, convert to USD value
+                    avg_volume = market_data['volume'].rolling(window=24).mean().iloc[-1] * current_price
+                    
+                    if avg_volume < 100000:  # Less than $100k average volume
+                        logger.warning(f"Low liquidity for {symbol}: ${avg_volume:.2f} avg volume")
+            
+            # Use Kelly criterion for position sizing if we have enough trades
+            min_position_size = 0.001  # Minimum position size (0.1% of account)
+            min_trade_value = 10.0     # Minimum trade value in USDT
+            
+            # Calculate risk percentage based on signal strength
+            risk_pct = self.risk_percentage * signal_strength
+            
+            # If we have enough trade history, use Kelly position sizing
+            if hasattr(self, 'performance_tracker') and \
+               symbol in self.performance_tracker.symbols_performance and \
+               self.performance_tracker.symbols_performance[symbol]['trades'] >= self.min_trades_for_kelly:
+                try:
+                    kelly_pct = self.performance_tracker.calculate_optimal_position_size(
+                        symbol, account_balance, self.kelly_factor, self.min_trades_for_kelly
+                    )
+                    
+                    # Apply a floor to Kelly percentage to prevent tiny positions
+                    # Use at least 30% of the basic risk percentage if Kelly is very small
+                    kelly_pct = max(kelly_pct, risk_pct * 0.3)
+                    
+                    logger.info(f"Using Kelly position sizing for {symbol}: {kelly_pct:.2f}%")
+                    position_size = (account_balance * kelly_pct / 100) / current_price
+                except Exception as e:
+                    logger.warning(f"Error calculating Kelly position size: {e}. Using standard sizing.")
+                    position_size = self._calculate_position_size_simple(
+                        account_balance, current_price, risk_pct, signal_strength
+                    )
             else:
-                # Use base risk percentage adjusted by signal strength
-                adjusted_risk = self.risk_percentage * min(1.0, signal_strength)
-                risk_pct = adjusted_risk / 100  # Convert percentage to decimal
-                logger.info(f"Using standard position sizing for {symbol}: {adjusted_risk:.2f}%")
-                
-            # Calculate position size based on risk percentage
-            position_value = account_balance * risk_pct
-            quantity = position_value / current_price
+                # Standard position sizing based on fixed risk percentage
+                logger.info(f"Using standard position sizing for {symbol}: {risk_pct:.2f}%")
+                position_size = self._calculate_position_size_simple(
+                    account_balance, current_price, risk_pct, signal_strength
+                )
             
-            # Round quantity based on symbol filters if available
+            # Apply minimum position constraints for meaningful backtesting
+            min_qty_by_value = min_trade_value / current_price
+            min_qty_by_pct = (account_balance * min_position_size / 100) / current_price
+            min_position_qty = max(min_qty_by_value, min_qty_by_pct)
+            
+            if self.is_backtest:
+                # During backtesting, ensure we have a meaningful position size
+                position_size = max(position_size, min_position_qty)
+            
+            # Round position size according to lot size rules
             if not self.is_backtest:
                 try:
-                    symbol_filters = self.order_executor.get_symbol_filters(symbol)
-                    step_size = symbol_filters['LOT_SIZE']['step_size']
-                    min_qty = symbol_filters['LOT_SIZE']['min_qty']
-                
-                    # Ensure quantity meets minimum requirements
-                    quantity = max(quantity, min_qty)
-                    
-                    # Round to valid step size
-                    quantity = self.order_executor.round_step_size(quantity, step_size)
+                    # Get symbol info for proper rounding
+                    symbol_info = self.order_executor.get_symbol_filters(symbol)
+                    lot_size_filter = symbol_info.get('LOT_SIZE', {})
+                    step_size = lot_size_filter.get('stepSize', 0.00001)
+                    position_size = self.order_executor.round_step_size(position_size, float(step_size))
                 except Exception as e:
-                    logger.error(f"Error calculating position size: {e}")
-                    # Default to simple rounding for backtesting
-                    quantity = round(quantity, 6)
+                    logger.error(f"Error getting symbol info for {symbol}: {e}")
+                    # Use a reasonable default if error occurs
+                    position_size = round(position_size, 5)
             else:
-                # For backtesting, use simple rounding as we don't have actual symbol filters
-                # These are typical values for BTC and most major cryptocurrencies
-                default_step_size = 0.00001
-                default_min_qty = 0.00001
+                # For backtesting, use a simpler rounding approach
+                position_size = round(position_size, 5)
                 
-                # Ensure quantity meets minimum requirements
-                quantity = max(quantity, default_min_qty)
-                
-                # Round to a reasonable precision for backtesting
-                precision = 5  # 5 decimals is reasonable for most cryptocurrencies
-                quantity = round(quantity, precision)
-            
-            logger.info(f"Calculated position size for {symbol}: {quantity} (value: ${position_value:.2f})")
-            return quantity
+            # Calculate position value
+            position_value = position_size * current_price
+            logger.info(f"Calculated position size for {symbol}: {position_size} (~${position_value:.2f})")
+            return position_size
             
         except Exception as e:
-            logger.error(f"Error in position size calculation: {e}")
+            logger.error(f"Error calculating position size: {e}")
             return 0
 
     def _handle_closed_trade(self, symbol, position, exit_price, exit_reason, exit_time=None):
@@ -914,6 +935,13 @@ class TradingBot:
             results['absolute_return'] = final_balance - initial_balance
             results['total_return'] = ((final_balance - initial_balance) / initial_balance) * 100 if initial_balance > 0 else 0
             
+            # Standardize profit field (could be 'profit' or 'pnl' depending on the trade object)
+            for trade in trades:
+                if 'profit' not in trade and 'pnl' in trade:
+                    trade['profit'] = trade['pnl']
+                elif 'profit' not in trade:
+                    trade['profit'] = 0.0
+            
             # Win/Loss metrics
             winning_trades = [t for t in trades if t.get('profit', 0) > 0]
             losing_trades = [t for t in trades if t.get('profit', 0) <= 0]
@@ -998,3 +1026,33 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Error calculating backtest metrics: {e}")
             return self._get_empty_backtest_results()
+
+    def run(self):
+        """
+        Start the trading bot in live or paper trading mode.
+        """
+        logger.info(f"Starting trading bot in {'paper trading' if self.is_paper_trading else 'live'} mode")
+        
+        # Initialize market data
+        market_data = self.update_market_data()
+        
+        # Start order book manager if configured
+        if self.use_order_book and self.order_book_manager:
+            self.order_book_manager.start()
+            logger.info("Order book manager started")
+        
+        # Trading loop will be implemented here
+        logger.info("Trading bot ready")
+        
+    def stop(self):
+        """
+        Stop the trading bot and clean up resources.
+        """
+        logger.info("Stopping trading bot")
+        
+        # Stop order book manager if running
+        if self.use_order_book and self.order_book_manager:
+            self.order_book_manager.stop()
+            logger.info("Order book manager stopped")
+        
+        logger.info("Trading bot stopped")

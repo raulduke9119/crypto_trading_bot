@@ -78,7 +78,7 @@ def parse_arguments():
     # Performance tracker parameters
     parser.add_argument('--kelly-factor', type=float, default=0.5,
                         help='Kelly criterion factor for position sizing (default: 0.5, half-Kelly)')
-    parser.add_argument('--min-trades', type=int, default=10,
+    parser.add_argument('--min-trades-for-kelly', type=int, default=10,
                         help='Minimum number of trades before using Kelly criterion (default: 10)')
     parser.add_argument('--history-file', type=str, 
                         help='Path to trade history file for performance tracking')
@@ -135,7 +135,7 @@ def main():
         'use_order_book': args.use_order_book,
         'order_book_depth': args.order_book_depth,
         'kelly_factor': args.kelly_factor,
-        'min_trades': args.min_trades,
+        'min_trades_for_kelly': args.min_trades_for_kelly,
         'history_file': args.history_file
     }
     
